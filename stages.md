@@ -2,7 +2,7 @@
 
 This is the master implementation roadmap. It **must** be updated after every completed stage: mark status, add an implementation summary, record architectural decisions, record tests performed, record known limitations, update the next stage if reality diverged, and update overall project status. See [CLAUDE.md](CLAUDE.md) for how to work on the project generally.
 
-**Overall project status: Stage 0 complete. Monorepo scaffolding in place; frontend, backend, and ai-service all build, lint, and talk to each other over HTTP. Ready to begin Stage 1.**
+**Overall project status: Stages 0–1 complete. Monorepo scaffolding in place; backend has a layered architecture (routes/controllers/services), centralized error handling, Zod validation, structured logging, and a passing test suite. Ready to begin Stage 2 (Database & Authentication).**
 
 ---
 
@@ -54,23 +54,33 @@ Implementation notes:
 ---
 
 ## Stage 1 — Backend Foundation
-Status: NOT STARTED
+Status: COMPLETED (2026-09-15)
 
 Objectives:
 - Solid Express/TypeScript application structure that later stages build on: routing, centralized error handling, request validation, logging, config loading.
 
 Tasks:
-- Express app factory with layered structure (routes/controllers/services).
-- Centralized error-handling middleware with consistent error response shape.
-- Request validation middleware (e.g. Zod schemas per route).
-- Structured logging (request id, level, no secrets in logs).
-- Environment/config loading and validation at boot (fail fast on missing required env vars).
+- [x] Express app factory with layered structure (routes/controllers/services/schemas).
+- [x] Centralized error-handling middleware with consistent error response shape (`{ error: { code, message, details? } }`).
+- [x] Request validation middleware (Zod schemas per route, via `validateBody`).
+- [x] Structured logging (request id, level, no secrets in logs) via `pino` + `pino-http`.
+- [x] Environment/config loading and validation at boot (Zod-validated env, fails fast on invalid/missing vars).
 
-Deliverables: A backend that boots, validates its own config, and has a documented pattern for adding a new route with validation + error handling.
+Deliverables: A backend that boots, validates its own config, and has a documented pattern for adding a new route with validation + error handling (the `echo` feature: `schemas/echo.schema.ts` → `services/echo.service.ts` → `controllers/echo.controller.ts` → `routes/echo.ts`).
 
-Acceptance Criteria: A sample route demonstrating the full pattern (validated input → service → typed response, plus a deliberately invalid request returning a clean 4xx) is present and tested.
+Acceptance Criteria: A sample route demonstrating the full pattern (validated input → service → typed response, plus a deliberately invalid request returning a clean 4xx) is present and tested. ✅ `POST /echo`; 4 passing Vitest + Supertest tests covering the success path, missing-field 400, and over-length 400, plus an unmatched-route 404 test.
 
 Dependencies: Stage 0 (backend skeleton must exist).
+
+Implementation notes:
+- **Error shape**: all errors respond as `{ error: { code, message, details? } }`. `AppError` (in `src/errors/AppError.ts`) is the only way application code should raise an HTTP-level error; anything else is caught by the catch-all `errorHandler` and logged + reported as a generic 500 (never leaks internals to the client).
+- **Validation**: `validateBody(schema)` middleware parses `req.body` with Zod and replaces it with the parsed/typed value on success, or forwards an `AppError.badRequest` (400) with Zod's flattened field errors on failure — no manual `if` validation blocks in controllers.
+- **Logging**: `pino-http` assigns a UUID per request (`x-request-id`, respecting an inbound header if the caller already set one), logs method/path/status/duration, and never logs the request body — avoids leaking submitted content (relevant later once request bodies carry student answers).
+- **Env validation**: `src/config/env.ts` now validates via a Zod schema (`PORT`, `NODE_ENV`, `AI_SERVICE_URL`, `LOG_LEVEL`) instead of ad hoc fallback logic, and throws at boot on invalid config rather than failing later at first use.
+- **Testing**: added Vitest + Supertest to the backend workspace (`npm run test` at root delegates to it). Tests build the Express app in-process (no network port needed) and assert on status codes + response bodies. `LOG_LEVEL=silent` is set in `vitest.config.mts` to keep test output readable.
+- **Build hygiene**: `backend/tsconfig.json` now excludes `**/*.test.ts` and `src/__tests__` so test files don't leak into `dist/` (caught during verification — the first build attempt emitted compiled test files into the production build).
+- Tests performed: `npm run build`, `npm run lint`, `npm run typecheck`, `npm run test` all pass at the root. Live smoke test: booted the backend directly and curled `/health`, `POST /echo` (valid + invalid), and an unmatched route — confirmed correct status codes, response shapes, and request-id logging end to end.
+- No known limitations carried forward; auth/DB (Stage 2) is the next real dependency for further backend work.
 
 ---
 

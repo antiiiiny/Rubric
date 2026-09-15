@@ -1,23 +1,22 @@
 import cors from "cors";
-import express, { type Express, type NextFunction, type Request, type Response } from "express";
+import express, { type Express } from "express";
+import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
+import { requestLogger } from "./middleware/requestLogger";
+import { echoRouter } from "./routes/echo";
 import { healthRouter } from "./routes/health";
 
 export function createApp(): Express {
   const app = express();
 
+  app.use(requestLogger);
   app.use(cors());
   app.use(express.json());
 
   app.use(healthRouter);
+  app.use(echoRouter);
 
-  app.use((req: Request, res: Response) => {
-    res.status(404).json({ error: "Not found" });
-  });
-
-  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-    console.error(err);
-    res.status(500).json({ error: "Internal server error" });
-  });
+  app.use(notFoundHandler);
+  app.use(errorHandler);
 
   return app;
 }

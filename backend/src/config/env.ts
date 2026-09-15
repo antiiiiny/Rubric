@@ -1,21 +1,29 @@
 import "dotenv/config";
+import { z } from "zod";
 
-interface Env {
-  port: number;
-  nodeEnv: string;
-  aiServiceUrl: string;
-}
+const envSchema = z.object({
+  PORT: z.coerce.number().int().positive().default(4000),
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  AI_SERVICE_URL: z.url().default("http://localhost:8000"),
+  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+});
 
-function requireEnv(name: string, fallback?: string): string {
-  const value = process.env[name] ?? fallback;
-  if (value === undefined) {
-    throw new Error(`Missing required environment variable: ${name}`);
+function loadEnv() {
+  const parsed = envSchema.safeParse(process.env);
+  if (!parsed.success) {
+    console.error("Invalid environment configuration:", parsed.error.flatten().fieldErrors);
+    throw new Error("Missing or invalid required environment variables");
   }
-  return value;
+  return parsed.data;
 }
 
-export const env: Env = {
-  port: Number(requireEnv("PORT", "4000")),
-  nodeEnv: requireEnv("NODE_ENV", "development"),
-  aiServiceUrl: requireEnv("AI_SERVICE_URL", "http://localhost:8000"),
+const parsedEnv = loadEnv();
+
+export const env = {
+  port: parsedEnv.PORT,
+  nodeEnv: parsedEnv.NODE_ENV,
+  aiServiceUrl: parsedEnv.AI_SERVICE_URL,
+  logLevel: parsedEnv.LOG_LEVEL,
+  isProduction: parsedEnv.NODE_ENV === "production",
+  isTest: parsedEnv.NODE_ENV === "test",
 };
