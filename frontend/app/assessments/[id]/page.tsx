@@ -12,6 +12,7 @@ import {
   listSubmissions,
   publishAssessment,
   submitAssessment,
+  submitDocumentAssignment,
   type Answer,
   type Assessment,
   type AuthUser,
@@ -20,7 +21,7 @@ import {
   type SubmitAnswerInput,
 } from "../../../lib/api";
 
-type NewQuestionType = "mcq" | "short_answer";
+type NewQuestionType = "mcq" | "short_answer" | "document";
 
 const STATUS_STYLES: Record<string, string> = {
   covered: "text-emerald-700",
@@ -87,6 +88,23 @@ function EvaluationBreakdown({ evaluation }: { evaluation: Answer["evaluation"] 
           </ul>
         </details>
       )}
+    </div>
+  );
+}
+
+function SectionCheckList({ sectionCheck }: { sectionCheck: Answer["section_check"] }) {
+  if (!sectionCheck || sectionCheck.length === 0) return null;
+  return (
+    <div className="mt-2 text-xs">
+      <p className="font-medium text-slate-700">Required sections</p>
+      <ul className="mt-1 space-y-0.5">
+        {sectionCheck.map((s, i) => (
+          <li key={i} className={s.found ? "text-emerald-700" : s.required ? "text-red-700" : "text-slate-500"}>
+            {s.name}: {s.found ? "found" : "missing"}
+            {!s.required && !s.found ? " (optional)" : ""}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -191,12 +209,14 @@ function FacultyView({
   submissions: SubmissionWithScore[] | null;
   onChange: () => Promise<void>;
 }) {
-  const [type, setType] = useState<NewQuestionType>("mcq");
+  const isAssignment = assessment.type === "assignment";
+  const [type, setType] = useState<NewQuestionType>(isAssignment ? "document" : "mcq");
   const [prompt, setPrompt] = useState("");
   const [options, setOptions] = useState(["", ""]);
   const [correctIndex, setCorrectIndex] = useState(0);
   const [expectedAnswer, setExpectedAnswer] = useState("");
   const [criteria, setCriteria] = useState([{ name: "", weight: 0 }]);
+  const [sections, setSections] = useState([{ name: "", required: true }]);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
@@ -207,6 +227,7 @@ function FacultyView({
     setCorrectIndex(0);
     setExpectedAnswer("");
     setCriteria([{ name: "", weight: 0 }]);
+    setSections([{ name: "", required: true }]);
   }
 
   async function onAddQuestion(e: React.FormEvent) {
@@ -221,12 +242,20 @@ function FacultyView({
           options: options.filter((o) => o.trim() !== ""),
           correctIndex,
         });
-      } else {
+      } else if (type === "short_answer") {
         await addQuestion(assessment.id, {
           type: "short_answer",
           prompt,
           expectedAnswer,
           criteria: criteria.filter((c) => c.name.trim() !== ""),
+        });
+      } else {
+        await addQuestion(assessment.id, {
+          type: "document",
+          prompt,
+          expectedAnswer,
+          criteria: criteria.filter((c) => c.name.trim() !== ""),
+          sections: sections.filter((s) => s.name.trim() !== ""),
         });
       }
       resetForm();
@@ -279,6 +308,12 @@ function FacultyView({
                       </li>
                     ))}
                   </ul>
+                  {q.type === "document" && q.sections.length > 0 && (
+                    <p className="mt-1">
+                      Required sections:{" "}
+                      {q.sections.map((s) => `${s.name}${s.required ? "" : " (optional)"}`).join(", ")}
+                    </p>
+                  )}
                 </div>
               )}
             </li>
@@ -304,8 +339,14 @@ function FacultyView({
             onChange={(e) => setType(e.target.value as NewQuestionType)}
             className="rounded-md border border-slate-300 px-3 py-2 text-sm"
           >
-            <option value="mcq">Multiple choice</option>
-            <option value="short_answer">Short answer</option>
+            {isAssignment ? (
+              <option value="document">Document upload</option>
+            ) : (
+              <>
+                <option value="mcq">Multiple choice</option>
+                <option value="short_answer">Short answer</option>
+              </>
+            )}
           </select>
           <textarea
             placeholder="Question prompt"
@@ -395,6 +436,46 @@ function FacultyView({
                   Total weight: {weightSum}%
                 </span>
               </div>
+
+              {type === "document" && (
+                <>
+                  <p className="mt-2 text-xs text-slate-500">Required document sections</p>
+                  {sections.map((s, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="Section name (e.g. Introduction)"
+                        value={s.name}
+                        onChange={(e) => {
+                          const next = [...sections];
+                          next[i] = { ...next[i], name: e.target.value };
+                          setSections(next);
+                        }}
+                        className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      />
+                      <label className="flex items-center gap-1 text-xs text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={s.required}
+                          onChange={(e) => {
+                            const next = [...sections];
+                            next[i] = { ...next[i], required: e.target.checked };
+                            setSections(next);
+                          }}
+                        />
+                        Required
+                      </label>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setSections([...sections, { name: "", required: true }])}
+                    className="self-start text-xs text-slate-600 underline"
+                  >
+                    Add section
+                  </button>
+                </>
+              )}
             </div>
           )}
 
@@ -419,11 +500,15 @@ function FacultyView({
                   {s.student?.fullName ?? s.student?.email} — score:{" "}
                   {s.totalScore === null ? "pending AI evaluation" : `${s.totalScore}%`}
                 </p>
-                {s.answers
-                  .filter((a) => a.evaluation)
-                  .map((a) => (
-                    <EvaluationBreakdown key={a.id} evaluation={a.evaluation} />
-                  ))}
+                {s.answers.map((a) => (
+                  <div key={a.id}>
+                    {a.original_filename && (
+                      <p className="mt-1 text-xs text-slate-500">File: {a.original_filename}</p>
+                    )}
+                    <SectionCheckList sectionCheck={a.section_check} />
+                    {a.evaluation && <EvaluationBreakdown evaluation={a.evaluation} />}
+                  </div>
+                ))}
               </li>
             ))}
             {submissions.length === 0 && <li className="text-slate-500">No submissions yet.</li>}
@@ -479,11 +564,13 @@ function StudentView({
                 ) : (
                   <>
                     <p className="text-slate-600">
-                      Your answer: {answer?.text_answer} — score:{" "}
+                      {q.type === "document" ? `File: ${answer?.original_filename ?? "—"}` : `Your answer: ${answer?.text_answer}`}{" "}
+                      — score:{" "}
                       {answer?.score === null || answer?.score === undefined
                         ? "pending AI evaluation"
                         : `${answer.score}%`}
                     </p>
+                    <SectionCheckList sectionCheck={answer?.section_check ?? null} />
                     <EvaluationBreakdown evaluation={answer?.evaluation} />
                   </>
                 )}
@@ -512,6 +599,14 @@ function StudentView({
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (assessment.type === "assignment") {
+    const documentQuestion = questions.find((q) => q.type === "document");
+    if (!documentQuestion) {
+      return <p className="text-sm text-slate-500">This assignment has no document question yet.</p>;
+    }
+    return <DocumentUploadForm assessment={assessment} question={documentQuestion} onSubmitted={onSubmitted} />;
   }
 
   return (
@@ -553,6 +648,63 @@ function StudentView({
         className="self-start rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
       >
         {submitting ? "Submitting…" : "Submit quiz"}
+      </button>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+    </form>
+  );
+}
+
+function DocumentUploadForm({
+  assessment,
+  question,
+  onSubmitted,
+}: {
+  assessment: Assessment;
+  question: Question;
+  onSubmitted: () => Promise<void>;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!file) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      await submitDocumentAssignment(assessment.id, question.id, file);
+      await onSubmitted();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not submit assignment.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
+        <p className="font-medium">{question.prompt}</p>
+        {question.sections.length > 0 && (
+          <p className="mt-1 text-xs text-slate-500">
+            Required sections: {question.sections.map((s) => s.name).join(", ")}
+          </p>
+        )}
+        <input
+          type="file"
+          accept=".pdf,.docx"
+          required
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          className="mt-3 block text-sm"
+        />
+      </div>
+      <button
+        type="submit"
+        disabled={submitting || !file}
+        className="self-start rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+      >
+        {submitting ? "Uploading…" : "Submit assignment"}
       </button>
       {error && <p className="text-sm text-red-600">{error}</p>}
     </form>

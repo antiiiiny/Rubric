@@ -12,6 +12,7 @@ import {
   listAssessments,
   listCourseMembers,
   type Assessment,
+  type AssessmentType,
   type AuthUser,
   type Course,
   type CourseMember,
@@ -29,6 +30,7 @@ export default function CourseDetailPage() {
   const [enrollError, setEnrollError] = useState<string | null>(null);
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [newQuizTitle, setNewQuizTitle] = useState("");
+  const [newQuizType, setNewQuizType] = useState<AssessmentType>("quiz");
   const [creatingQuiz, setCreatingQuiz] = useState(false);
   const [quizError, setQuizError] = useState<string | null>(null);
 
@@ -79,7 +81,7 @@ export default function CourseDetailPage() {
     setQuizError(null);
     setCreatingQuiz(true);
     try {
-      await createAssessment(params.id, newQuizTitle);
+      await createAssessment(params.id, newQuizTitle, newQuizType);
       setNewQuizTitle("");
       await refreshAssessments(params.id);
     } catch (err) {
@@ -148,24 +150,34 @@ export default function CourseDetailPage() {
       )}
 
       <div className="rounded-lg border border-slate-200 bg-white p-4">
-        <p className="text-sm font-medium">Quizzes</p>
+        <p className="text-sm font-medium">Quizzes &amp; Assignments</p>
         <ul className="mt-2 space-y-1 text-sm text-slate-700">
           {assessments.map((a) => (
             <li key={a.id}>
               <Link href={`/assessments/${a.id}`} className="underline">
                 {a.title}
               </Link>{" "}
-              <span className="text-xs text-slate-500">({a.status})</span>
+              <span className="text-xs text-slate-500">
+                ({a.type}, {a.status})
+              </span>
             </li>
           ))}
-          {assessments.length === 0 && <li className="text-slate-500">No quizzes yet.</li>}
+          {assessments.length === 0 && <li className="text-slate-500">Nothing here yet.</li>}
         </ul>
 
         {user?.role === "faculty" && (
           <form onSubmit={onCreateQuiz} className="mt-4 flex gap-2">
+            <select
+              value={newQuizType}
+              onChange={(e) => setNewQuizType(e.target.value as AssessmentType)}
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+            >
+              <option value="quiz">Quiz</option>
+              <option value="assignment">Assignment</option>
+            </select>
             <input
               type="text"
-              placeholder="Quiz title"
+              placeholder="Title"
               required
               value={newQuizTitle}
               onChange={(e) => setNewQuizTitle(e.target.value)}
@@ -176,7 +188,7 @@ export default function CourseDetailPage() {
               disabled={creatingQuiz}
               className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
             >
-              {creatingQuiz ? "Creating…" : "Create quiz"}
+              {creatingQuiz ? "Creating…" : "Create"}
             </button>
           </form>
         )}

@@ -5,6 +5,7 @@ import {
   getMySubmission,
   getSubmissions,
   postAssessment,
+  postDocumentSubmission,
   postPublish,
   postQuestion,
   postSubmission,
@@ -12,6 +13,7 @@ import {
 import { authenticate, requireRole } from "../middleware/auth";
 import { requireAssessmentAccess, requireAssessmentOwner } from "../middleware/assessmentAccess";
 import { requireCourseAccess, requireCourseOwner } from "../middleware/courseAccess";
+import { uploadDocument } from "../middleware/upload";
 import { validateBody } from "../middleware/validate";
 import {
   createAssessmentSchema,
@@ -62,6 +64,13 @@ assessmentsRouter.post(
   requireRole("student"),
   validateBody(submitAssessmentSchema),
   asyncHandler(postSubmission),
+);
+assessmentsRouter.post(
+  "/assessments/:assessmentId/submissions/document",
+  requireAssessmentAccess,
+  requireRole("student"),
+  uploadDocument,
+  asyncHandler(postDocumentSubmission),
 );
 assessmentsRouter.get(
   "/assessments/:assessmentId/submissions/me",

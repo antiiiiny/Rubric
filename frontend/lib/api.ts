@@ -102,13 +102,14 @@ export function enrollStudent(id: string, email: string): Promise<{ enrolled: un
 }
 
 export type AssessmentStatus = "draft" | "published";
-export type QuestionType = "mcq" | "short_answer";
+export type AssessmentType = "quiz" | "assignment";
+export type QuestionType = "mcq" | "short_answer" | "document";
 
 export interface Assessment {
   id: string;
   course_id: string;
   title: string;
-  type: "quiz";
+  type: AssessmentType;
   status: AssessmentStatus;
   created_at: string;
   updated_at: string;
@@ -122,6 +123,14 @@ export interface RubricCriterion {
   order_index: number;
 }
 
+export interface AssignmentSection {
+  id: string;
+  question_id: string;
+  name: string;
+  required: boolean;
+  order_index: number;
+}
+
 export interface Question {
   id: string;
   assessment_id: string;
@@ -132,6 +141,7 @@ export interface Question {
   mcq_correct_index?: number | null;
   expected_answer?: string | null;
   criteria: RubricCriterion[];
+  sections: AssignmentSection[];
 }
 
 export interface Submission {
@@ -179,6 +189,12 @@ export interface AnswerEvaluation {
   criteria: CriterionResult[];
 }
 
+export interface SectionCheckResult {
+  name: string;
+  required: boolean;
+  found: boolean;
+}
+
 export interface Answer {
   id: string;
   submission_id: string;
@@ -186,11 +202,20 @@ export interface Answer {
   mcq_selected_index: number | null;
   text_answer: string | null;
   score: string | null;
+  original_filename: string | null;
+  section_check: SectionCheckResult[] | null;
   evaluation?: AnswerEvaluation | null;
 }
 
-export function createAssessment(courseId: string, title: string): Promise<{ assessment: Assessment }> {
-  return apiFetch(`/courses/${courseId}/assessments`, { method: "POST", body: JSON.stringify({ title }) });
+export function createAssessment(
+  courseId: string,
+  title: string,
+  type: AssessmentType = "quiz",
+): Promise<{ assessment: Assessment }> {
+  return apiFetch(`/courses/${courseId}/assessments`, {
+    method: "POST",
+    body: JSON.stringify({ title, type }),
+  });
 }
 
 export function listAssessments(courseId: string): Promise<{ assessments: Assessment[] }> {
@@ -210,6 +235,13 @@ export type CreateQuestionInput =
       prompt: string;
       expectedAnswer: string;
       criteria: { name: string; weight: number }[];
+    }
+  | {
+      type: "document";
+      prompt: string;
+      expectedAnswer: string;
+      criteria: { name: string; weight: number }[];
+      sections: { name: string; required: boolean }[];
     };
 
 export function addQuestion(
@@ -238,6 +270,30 @@ export function submitAssessment(
     method: "POST",
     body: JSON.stringify({ answers }),
   });
+}
+
+export async function submitDocumentAssignment(
+  assessmentId: string,
+  questionId: string,
+  file: File,
+): Promise<{ submission: Submission; answers: Answer[] }> {
+  const formData = new FormData();
+  formData.append("questionId", questionId);
+  formData.append("file", file);
+
+  // Raw fetch (not apiFetch) — multipart requests must let the browser set
+  // the Content-Type header itself (with the multipart boundary).
+  const res = await fetch(`${API_URL}/assessments/${assessmentId}/submissions/document`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+
+  const body = await res.json();
+  if (!res.ok) {
+    throw new ApiError(res.status, body as ApiErrorBody);
+  }
+  return body;
 }
 
 export function getMySubmission(

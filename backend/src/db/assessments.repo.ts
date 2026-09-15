@@ -1,13 +1,14 @@
 import { pool } from "./pool";
 
 export type AssessmentStatus = "draft" | "published";
-export type QuestionType = "mcq" | "short_answer";
+export type AssessmentType = "quiz" | "assignment";
+export type QuestionType = "mcq" | "short_answer" | "document";
 
 export interface AssessmentRow {
   id: string;
   course_id: string;
   title: string;
-  type: "quiz";
+  type: AssessmentType;
   status: AssessmentStatus;
   created_at: Date;
   updated_at: Date;
@@ -41,6 +42,20 @@ export interface SubmissionRow {
   submitted_at: Date;
 }
 
+export interface AssignmentSectionRow {
+  id: string;
+  question_id: string;
+  name: string;
+  required: boolean;
+  order_index: number;
+}
+
+export interface SectionCheckEntry {
+  name: string;
+  required: boolean;
+  found: boolean;
+}
+
 export interface AnswerRow {
   id: string;
   submission_id: string;
@@ -48,13 +63,19 @@ export interface AnswerRow {
   mcq_selected_index: number | null;
   text_answer: string | null;
   score: string | null;
+  original_filename: string | null;
+  section_check: SectionCheckEntry[] | null;
   created_at: Date;
 }
 
-export async function insertAssessment(courseId: string, title: string): Promise<AssessmentRow> {
+export async function insertAssessment(
+  courseId: string,
+  title: string,
+  type: AssessmentType = "quiz",
+): Promise<AssessmentRow> {
   const result = await pool.query<AssessmentRow>(
-    `INSERT INTO assessments (course_id, title) VALUES ($1, $2) RETURNING *`,
-    [courseId, title],
+    `INSERT INTO assessments (course_id, title, type) VALUES ($1, $2, $3) RETURNING *`,
+    [courseId, title, type],
   );
   return result.rows[0];
 }
@@ -173,10 +194,13 @@ export async function insertAnswer(input: {
   mcqSelectedIndex?: number;
   textAnswer?: string;
   score?: number;
+  originalFilename?: string;
+  sectionCheck?: SectionCheckEntry[];
 }): Promise<AnswerRow> {
   const result = await pool.query<AnswerRow>(
-    `INSERT INTO answers (submission_id, question_id, mcq_selected_index, text_answer, score)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO answers
+       (submission_id, question_id, mcq_selected_index, text_answer, score, original_filename, section_check)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING *`,
     [
       input.submissionId,
@@ -184,9 +208,43 @@ export async function insertAnswer(input: {
       input.mcqSelectedIndex ?? null,
       input.textAnswer ?? null,
       input.score ?? null,
+      input.originalFilename ?? null,
+      input.sectionCheck ? JSON.stringify(input.sectionCheck) : null,
     ],
   );
   return result.rows[0];
+}
+
+export async function findQuestionById(id: string): Promise<QuestionRow | null> {
+  const result = await pool.query<QuestionRow>(`SELECT * FROM questions WHERE id = $1`, [id]);
+  return result.rows[0] ?? null;
+}
+
+export async function insertAssignmentSections(
+  questionId: string,
+  sections: { name: string; required: boolean }[],
+): Promise<AssignmentSectionRow[]> {
+  const rows: AssignmentSectionRow[] = [];
+  for (let i = 0; i < sections.length; i++) {
+    const result = await pool.query<AssignmentSectionRow>(
+      `INSERT INTO assignment_sections (question_id, name, required, order_index)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [questionId, sections[i].name, sections[i].required, i],
+    );
+    rows.push(result.rows[0]);
+  }
+  return rows;
+}
+
+export async function listAssignmentSectionsForQuestion(
+  questionId: string,
+): Promise<AssignmentSectionRow[]> {
+  const result = await pool.query<AssignmentSectionRow>(
+    `SELECT * FROM assignment_sections WHERE question_id = $1 ORDER BY order_index ASC`,
+    [questionId],
+  );
+  return result.rows;
 }
 
 export async function updateAnswerScore(answerId: string, score: number | null): Promise<void> {

@@ -2,12 +2,18 @@ import { z } from "zod";
 
 export const createAssessmentSchema = z.object({
   title: z.string().min(1).max(200),
+  type: z.enum(["quiz", "assignment"]).default("quiz"),
 });
 export type CreateAssessmentInput = z.infer<typeof createAssessmentSchema>;
 
 const rubricCriterionSchema = z.object({
   name: z.string().min(1).max(200),
   weight: z.number().int().min(1).max(100),
+});
+
+const assignmentSectionSchema = z.object({
+  name: z.string().min(1).max(200),
+  required: z.boolean().default(true),
 });
 
 export const createQuestionSchema = z
@@ -24,13 +30,22 @@ export const createQuestionSchema = z
       expectedAnswer: z.string().min(1),
       criteria: z.array(rubricCriterionSchema).min(1),
     }),
+    z.object({
+      type: z.literal("document"),
+      prompt: z.string().min(1),
+      expectedAnswer: z.string().min(1),
+      criteria: z.array(rubricCriterionSchema).min(1),
+      sections: z.array(assignmentSectionSchema).default([]),
+    }),
   ])
   .refine(
     (data) => data.type !== "mcq" || data.correctIndex < data.options.length,
     { message: "correctIndex must be a valid index into options" },
   )
   .refine(
-    (data) => data.type !== "short_answer" || data.criteria.reduce((sum, c) => sum + c.weight, 0) === 100,
+    (data) =>
+      (data.type !== "short_answer" && data.type !== "document") ||
+      data.criteria.reduce((sum, c) => sum + c.weight, 0) === 100,
     { message: "rubric criteria weights must sum to 100" },
   );
 export type CreateQuestionInput = z.infer<typeof createQuestionSchema>;

@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { MulterError } from "multer";
 import { AppError } from "../errors/AppError";
 import { logger } from "../utils/logger";
 
@@ -21,6 +22,12 @@ export function errorHandler(err: Error, req: Request, res: Response, _next: Nex
       error: { code: err.code, message: err.message, details: err.details },
     };
     res.status(err.statusCode).json(body);
+    return;
+  }
+
+  if (err instanceof MulterError) {
+    const body: ErrorResponseBody = { error: { code: "BAD_REQUEST", message: err.message } };
+    res.status(400).json(body);
     return;
   }
 

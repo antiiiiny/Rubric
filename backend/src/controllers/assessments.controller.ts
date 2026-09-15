@@ -1,16 +1,21 @@
 import type { Request, Response } from "express";
 import {
   findCriteriaByIds,
+  findQuestionById,
   findSubmission,
   insertAssessment,
+  insertAssignmentSections,
   insertQuestion,
   insertRubricCriteria,
+  insertSubmission,
   listAnswersForSubmission,
   listAssessmentsForCourse,
+  listAssignmentSectionsForQuestion,
   listCriteriaForQuestions,
   listQuestionsForAssessment,
   listSubmissionsForAssessment,
   publishAssessment,
+  insertAnswer,
   type AnswerRow,
   type QuestionRow,
 } from "../db/assessments.repo";
@@ -23,6 +28,8 @@ import { findUserById } from "../db/users.repo";
 import { AppError } from "../errors/AppError";
 import type { CreateAssessmentInput, CreateQuestionInput, SubmitAssessmentInput } from "../schemas/assessment.schema";
 import { submitAssessment as submitAssessmentService } from "../services/assessment.service";
+import { detectSections, extractText } from "../services/documentExtraction.service";
+import { evaluateShortAnswer } from "../services/evaluation.service";
 
 async function attachEvaluations(answers: AnswerRow[]) {
   const evaluations = await listEvaluationsForAnswers(answers.map((a) => a.id));
@@ -91,7 +98,7 @@ function sanitizeQuestion(question: QuestionRow, forStudent: boolean) {
 
 export async function postAssessment(req: Request, res: Response) {
   const body = req.body as CreateAssessmentInput;
-  const assessment = await insertAssessment(req.course!.id, body.title);
+  const assessment = await insertAssessment(req.course!.id, body.title, body.type);
   res.status(201).json({ assessment });
 }
 
@@ -111,10 +118,17 @@ export async function getAssessment(req: Request, res: Response) {
     criteriaByQuestion.set(c.question_id, list);
   }
 
+  const documentQuestions = questions.filter((q) => q.type === "document");
+  const sectionsByQuestion = new Map<string, Awaited<ReturnType<typeof listAssignmentSectionsForQuestion>>>();
+  for (const q of documentQuestions) {
+    sectionsByQuestion.set(q.id, await listAssignmentSectionsForQuestion(q.id));
+  }
+
   const forStudent = !req.isCourseOwner;
   const questionsOut = questions.map((q) => ({
     ...sanitizeQuestion(q, forStudent),
     criteria: criteriaByQuestion.get(q.id) ?? [],
+    sections: sectionsByQuestion.get(q.id) ?? [],
   }));
 
   res.status(200).json({ assessment: req.assessment, questions: questionsOut });
@@ -129,27 +143,33 @@ export async function postQuestion(req: Request, res: Response) {
   const body = req.body as CreateQuestionInput;
   const existing = await listQuestionsForAssessment(assessment.id);
 
-  const question =
-    body.type === "mcq"
-      ? await insertQuestion({
-          assessmentId: assessment.id,
-          type: "mcq",
-          prompt: body.prompt,
-          orderIndex: existing.length,
-          mcqOptions: body.options,
-          mcqCorrectIndex: body.correctIndex,
-        })
-      : await insertQuestion({
-          assessmentId: assessment.id,
-          type: "short_answer",
-          prompt: body.prompt,
-          orderIndex: existing.length,
-          expectedAnswer: body.expectedAnswer,
-        });
+  let question;
+  if (body.type === "mcq") {
+    question = await insertQuestion({
+      assessmentId: assessment.id,
+      type: "mcq",
+      prompt: body.prompt,
+      orderIndex: existing.length,
+      mcqOptions: body.options,
+      mcqCorrectIndex: body.correctIndex,
+    });
+  } else {
+    question = await insertQuestion({
+      assessmentId: assessment.id,
+      type: body.type,
+      prompt: body.prompt,
+      orderIndex: existing.length,
+      expectedAnswer: body.expectedAnswer,
+    });
+  }
 
-  const criteria = body.type === "short_answer" ? await insertRubricCriteria(question.id, body.criteria) : [];
+  const criteria = body.type !== "mcq" ? await insertRubricCriteria(question.id, body.criteria) : [];
+  const sections =
+    body.type === "document" && body.sections.length > 0
+      ? await insertAssignmentSections(question.id, body.sections)
+      : [];
 
-  res.status(201).json({ question: { ...question, criteria } });
+  res.status(201).json({ question: { ...question, criteria, sections } });
 }
 
 export async function postPublish(req: Request, res: Response) {
@@ -178,6 +198,65 @@ export async function postSubmission(req: Request, res: Response) {
 
   const body = req.body as SubmitAssessmentInput;
   const submission = await submitAssessmentService(assessment.id, req.auth!.sub, body);
+  const rawAnswers = await listAnswersForSubmission(submission.id);
+  const answers = await attachEvaluations(rawAnswers);
+  res.status(201).json({ submission, answers });
+}
+
+export async function postDocumentSubmission(req: Request, res: Response) {
+  const assessment = req.assessment!;
+  if (assessment.status !== "published") {
+    throw AppError.badRequest("This assessment is not open for submission");
+  }
+  if (req.isCourseOwner) {
+    throw AppError.badRequest("Faculty cannot submit answers to their own assessment");
+  }
+
+  const existing = await findSubmission(assessment.id, req.auth!.sub);
+  if (existing) {
+    throw AppError.badRequest("You have already submitted this assessment");
+  }
+
+  const questionId = req.body.questionId as string | undefined;
+  if (!questionId) {
+    throw AppError.badRequest("questionId is required");
+  }
+  const question = await findQuestionById(questionId);
+  if (!question || question.assessment_id !== assessment.id || question.type !== "document") {
+    throw AppError.badRequest("Invalid document question for this assessment");
+  }
+
+  const file = req.file;
+  if (!file) {
+    throw AppError.badRequest("A file is required");
+  }
+
+  const text = await extractText(file.buffer, file.mimetype);
+  if (text.trim().length === 0) {
+    throw AppError.badRequest("The uploaded document contains no extractable text");
+  }
+
+  const sections = await listAssignmentSectionsForQuestion(question.id);
+  const sectionCheck = detectSections(text, sections);
+
+  const submission = await insertSubmission(assessment.id, req.auth!.sub);
+  const answer = await insertAnswer({
+    submissionId: submission.id,
+    questionId: question.id,
+    textAnswer: text,
+    originalFilename: file.originalname,
+    sectionCheck,
+  });
+
+  const criteria = await listCriteriaForQuestions([question.id]);
+  await evaluateShortAnswer({
+    answerId: answer.id,
+    questionPrompt: question.prompt,
+    expectedAnswer: question.expected_answer ?? "",
+    studentAnswer: text,
+    criteria,
+  });
+
   const rawAnswers = await listAnswersForSubmission(submission.id);
   const answers = await attachEvaluations(rawAnswers);
   res.status(201).json({ submission, answers });

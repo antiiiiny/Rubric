@@ -2,7 +2,7 @@
 
 This is the master implementation roadmap. It **must** be updated after every completed stage: mark status, add an implementation summary, record architectural decisions, record tests performed, record known limitations, update the next stage if reality diverged, and update overall project status. See [CLAUDE.md](CLAUDE.md) for how to work on the project generally.
 
-**Overall project status: Stages 0–6 complete (fast/minimum-scope mode from here per explicit user request — functional over exhaustive). Foundation, auth, course management, the quiz system, and AI evaluation (now the full LangGraph multi-agent pipeline: parallel Concept/Accuracy/Completeness evaluators → Judge → conditional conflict resolution → Feedback agent, fully audited via `evaluation_runs`/`agent_results`) are all live end-to-end. Ready to begin Stage 7 (Assignment Evaluation / document uploads).**
+**Overall project status: Stages 0–7 complete (fast/minimum-scope mode from here per explicit user request — functional over exhaustive). Foundation, auth, course management, the quiz system, multi-agent AI evaluation, and assignment/document evaluation (PDF/DOCX upload → safe text extraction → deterministic required-section detection → the same multi-agent pipeline) are all live end-to-end. Ready to begin Stage 8 (Faculty Review).**
 
 ---
 
@@ -246,22 +246,35 @@ Implementation notes:
 ---
 
 ## Stage 7 — Assignment Evaluation
-Status: NOT STARTED
+Status: COMPLETED (2026-09-15) — minimum-viable scope
 
 Objectives:
 - Extend evaluation to document-based assignment submissions (PDF/DOCX): section detection, content-to-rubric matching.
 
 Tasks:
-- File upload (type/size validated), safe parsing (PDF/DOCX text extraction, no code execution risk).
-- Required-section detection against faculty-defined assignment structure.
-- Reuse the Stage 6 evaluation pipeline per relevant section/criterion, with document content passed as clearly-delimited untrusted data (prompt-injection resistant).
-- Faculty view of assignment evaluation: section presence, per-criterion results, missing/weak areas.
+- [x] File upload (type/size validated), safe parsing (PDF/DOCX text extraction, no code execution risk).
+- [x] Required-section detection against faculty-defined assignment structure.
+- [x] Reuse the Stage 6 evaluation pipeline per relevant section/criterion, with document content passed as clearly-delimited untrusted data (prompt-injection resistant).
+- [x] Faculty view of assignment evaluation: section presence, per-criterion results, missing/weak areas.
 
-Deliverables: A student can upload a document assignment and receive a structured, section-aware evaluation.
+Deliverables: A student can upload a document assignment and receive a structured, section-aware evaluation. ✅
 
-Acceptance Criteria: A document missing a required section is correctly flagged as missing (not silently scored 0 without explanation); a malicious document containing prompt-injection text does not alter evaluator behavior (tested explicitly).
+Acceptance Criteria: A document missing a required section is correctly flagged as missing (not silently scored 0 without explanation); a malicious document containing prompt-injection text does not alter evaluator behavior (tested explicitly). ✅ See implementation notes.
 
 Dependencies: Stage 6.
+
+Implementation notes:
+- **Architectural choice: reuse over rebuild.** Rather than a parallel data model for assignments, an "assignment" is simply an `assessment` with `type='assignment'` containing one `question` of a new `type='document'` (same `rubric_criteria` linkage as `short_answer`). This let Stage 7 reuse essentially all of Stage 4-6's machinery unchanged — access control, publish flow, the multi-agent evaluation pipeline, deterministic weighted scoring, evaluation persistence — with the only new work being the upload/extraction/section-detection layer in front of it. A `document` question's extracted text is passed as `studentAnswer` to the exact same `evaluateShortAnswer` call used for quizzes.
+- **Schema**: migration `1757900000004_assignment-schema` widens `assessments.type` to `('quiz','assignment')` and `questions.type` to `('mcq','short_answer','document')`, adds `assignment_sections` (per-question required/optional section names), and adds `answers.original_filename`/`answers.section_check` (jsonb) columns.
+- **File handling**: `multer` (memory storage, 10MB limit, mimetype allowlist restricted to PDF and DOCX) on a dedicated `POST /assessments/:assessmentId/submissions/document` route (separate from the JSON `/submissions` route since it needs `multipart/form-data`). Rejected file types are caught by multer's `fileFilter` before the controller ever runs; oversized files are caught by `MulterError`, both mapped to clean 400s via a new `errorHandler.ts` branch (previously any non-`AppError` fell through to a generic 500).
+- **Text extraction** (`documentExtraction.service.ts`): `pdf-parse` v2 (`PDFParse` class, built on `pdfjs-dist` — tolerant of even minimal/malformed PDFs via pdf.js's recovery parsing, verified with a handwritten minimal-PDF fixture in testing) for PDF, `mammoth.extractRawText` for DOCX. Both are pure-JS parsers with no shell-out/native-code execution risk. A parse failure (corrupted file) is caught and surfaces as a clean 400, never a crash or silently-empty evaluation.
+- **Required-section detection is deterministic, not AI** (`detectSections`) — per CLAUDE.md's explicit deterministic/AI split, "required sections" belongs in the code bucket. A section counts as present if any line of the extracted text case-insensitively matches its name as a heading (tolerating trailing punctuation). This is intentionally a cheap heuristic (not layout/font-size-aware heading detection) — acceptable for demo scope since it's faculty-explainable and the result is always surfaced, never silently folded into the AI score.
+- **Prompt-injection resistance**: no new work was needed here — the untrusted-answer framing built in Stage 5/6 (`--- STUDENT ANSWER ---` / `--- END STUDENT ANSWER ---` markers around anything the student submitted) already applies uniformly to extracted document text, since it flows through the identical `evaluateShortAnswer` → ai-service `/evaluate` path. Added explicit test coverage (`test_prompt_injection_framing.py`) asserting, for every agent's prompt-builder, that untrusted content sits strictly inside those markers and a malicious "ignore all previous instructions" payload never appears before them — the closest deterministic proxy available for "the model isn't fooled" without a live, non-deterministic LLM call.
+- **Faculty/student explainability**: `attachEvaluations` (unchanged) already surfaces the reused evaluation; `original_filename` and a new `SectionCheckList` component show which required sections were found/missing, both in the faculty submissions list and the student's own results view — kept structurally separate from the rubric-criteria evaluation (a missing section is not silently blended into the AI score).
+- **Frontend**: course page's quiz-creation form gained a Quiz/Assignment type selector; the assessment authoring page's question form gained a "Document upload" question type (with a required-sections editor) shown only for assignment-type assessments; the student-facing submission form branches entirely to a dedicated `DocumentUploadForm` (native `<input type="file">`, PDF/DOCX only) for assignments instead of the quiz-taking form; `lib/api.ts` gained a `submitDocumentAssignment` function using raw `fetch`+`FormData` (not the JSON-only `apiFetch` wrapper, since multipart needs the browser to set its own Content-Type boundary).
+- Tests performed: `npm run build/lint/typecheck/test` at root (60/60 backend tests, up from 50 — new `documentExtraction.test.ts` unit-tests `detectSections`' case-insensitivity/punctuation-tolerance and `extractText`'s rejection of unsupported mimetypes and corrupted PDFs; new `assignment.test.ts` integration-tests the full flow with `extractText`/`evaluateAnswer` mocked — bad file type rejected at the multer layer, section detection correctly flags a missing required section, duplicate submission blocked, non-member blocked, and a document-parse failure surfaces as a clean 400). ai-service: `pytest` (19/19, up from 14 — 5 new `test_prompt_injection_framing.py` cases) and `ruff check` clean. Live end-to-end smoke test against the real Groq API, real Postgres, and a real (handwritten-minimal) PDF file via curl: uploaded a PDF with an "Introduction" section but no "Conclusion," confirmed `pdf-parse` extracted the real text, confirmed section detection correctly flagged Introduction=found/Conclusion=missing, and confirmed the multi-agent pipeline evaluated the extracted text and produced a deterministic score (100, since both rubric criteria happened to be covered) end to end.
+- Frontend build/lint/typecheck pass; **not** interactively verified in a browser (no browser-automation tool in this environment) — the file-input/upload flow is exercised only via the backend's real HTTP endpoint (curl) and TypeScript checking, not by clicking through a browser file picker.
+- **Known limitations**: an "assignment" assessment is modeled as exactly one document question (no multi-question assignments); section detection is a simple heading-line heuristic, not layout-aware (a section header styled unusually, e.g. bolded mid-paragraph text, could be missed); no antivirus/content-scanning on uploaded files (acceptable for demo scope on a local dev network, would need revisiting before any real deployment accepting untrusted uploads from the public internet); uploaded file bytes are not retained after text extraction (no object storage wired up) — only the extracted text and original filename are persisted, so a faculty member can't download the original file, only read its extracted content.
 
 ---
 
