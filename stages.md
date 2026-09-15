@@ -2,7 +2,7 @@
 
 This is the master implementation roadmap. It **must** be updated after every completed stage: mark status, add an implementation summary, record architectural decisions, record tests performed, record known limitations, update the next stage if reality diverged, and update overall project status. See [CLAUDE.md](CLAUDE.md) for how to work on the project generally.
 
-**Overall project status: Stages 0–2 complete. Monorepo scaffolding, layered backend architecture, and now Postgres (via Docker Compose) + JWT/bcrypt authentication with RBAC are all in place and verified end-to-end. Ready to begin Stage 3 (Course Management).**
+**Overall project status: Stages 0–3 complete (fast/minimum-scope mode from here per explicit user request — functional over exhaustive). Foundation, auth, and course management with verified data isolation are in place. Ready to begin Stage 4 (Quiz System).**
 
 ---
 
@@ -121,20 +121,26 @@ Implementation notes:
 ---
 
 ## Stage 3 — Course Management
-Status: NOT STARTED
+Status: COMPLETED (2026-09-15) — minimum-viable scope
 
 Objectives:
 - Faculty can create/manage courses and add students; both roles can navigate course-scoped pages.
 
 Tasks:
-- Course CRUD API + faculty UI (create/edit course).
-- Enrollment (faculty adds students, or student joins via code/invite — decide at implementation time).
-- Course Home / Students / Materials pages (frontend), matching the Section 3 nav structure.
-- Course-level authorization (only enrolled students / owning faculty can access a course's data).
+- [x] Course CRUD API (create + list + get) + faculty UI.
+- [x] Enrollment: faculty adds a student by email (simplest reliable option; no invite-code flow).
+- [x] Course list + course detail pages (frontend). Materials/analytics pages deferred — no content to show yet until Stage 4+.
+- [x] Course-level authorization (`requireCourseAccess`/`requireCourseOwner` middleware; non-member gets 404, not 403, to avoid leaking course existence).
 
 Deliverables: A faculty user can create a course and see it; a student can view courses they're enrolled in.
 
-Acceptance Criteria: Course-scoped data isolation verified (a student not enrolled in course X cannot fetch course X's data).
+Acceptance Criteria: Course-scoped data isolation verified (a student not enrolled in course X cannot fetch course X's data). ✅
+
+Implementation notes:
+- `users`/`courses`/`course_members` tables already existed from Stage 2, so this stage was pure API+UI.
+- Bug caught in testing: `coursesRouter.use(authenticate)` with no path prefix was intercepting *every* request through that router (including unmatched routes), breaking the global 404 handler — fixed by scoping it to `coursesRouter.use("/courses", authenticate)`.
+- Scope cut for speed: no course editing/deletion, no student self-join by code, no Materials/Analytics pages yet (nothing to show until quizzes/assignments and evaluations exist — those land in later stages and will extend course-scoped navigation then).
+- Tests: 9 new integration tests (create as faculty, block student create, enroll, cross-faculty enrollment blocked, member can view, non-member blocked, student's course list scoped correctly, owner can list members, non-owner blocked). 29/29 backend tests passing; frontend build/lint/typecheck clean.
 
 Dependencies: Stage 2.
 

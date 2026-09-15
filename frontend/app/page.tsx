@@ -56,12 +56,20 @@ export default function HomePage() {
               </p>
               <p className="text-slate-600">{user.email}</p>
             </div>
-            <button
-              onClick={onLogout}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50"
-            >
-              Log out
-            </button>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/courses"
+                className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
+              >
+                My Courses
+              </Link>
+              <button
+                onClick={onLogout}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50"
+              >
+                Log out
+              </button>
+            </div>
           </div>
         )}
         {!checkingSession && !user && (

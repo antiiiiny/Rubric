@@ -64,3 +64,39 @@ export function logout(): Promise<void> {
 export function getMe(): Promise<{ user: AuthUser }> {
   return apiFetch("/auth/me");
 }
+
+export interface Course {
+  id: string;
+  title: string;
+  description: string | null;
+  faculty_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CourseMember {
+  user_id: string;
+  email: string;
+  full_name: string;
+  joined_at: string;
+}
+
+export function createCourse(input: { title: string; description?: string }): Promise<{ course: Course }> {
+  return apiFetch("/courses", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function listCourses(): Promise<{ courses: Course[] }> {
+  return apiFetch("/courses");
+}
+
+export function getCourse(id: string): Promise<{ course: Course }> {
+  return apiFetch(`/courses/${id}`);
+}
+
+export function listCourseMembers(id: string): Promise<{ members: CourseMember[] }> {
+  return apiFetch(`/courses/${id}/members`);
+}
+
+export function enrollStudent(id: string, email: string): Promise<{ enrolled: unknown }> {
+  return apiFetch(`/courses/${id}/members`, { method: "POST", body: JSON.stringify({ email }) });
+}
