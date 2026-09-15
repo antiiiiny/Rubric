@@ -1,0 +1,39 @@
+.claude/
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+frontend/.next/
+frontend/out/
+backend/dist/
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Python
+ai-service/.venv/
+ai-service/__pycache__/
+**/__pycache__/
+*.pyc
+ai-service/.pytest_cache/
+*.egg-info/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
