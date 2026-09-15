@@ -2,7 +2,7 @@
 
 This is the master implementation roadmap. It **must** be updated after every completed stage: mark status, add an implementation summary, record architectural decisions, record tests performed, record known limitations, update the next stage if reality diverged, and update overall project status. See [CLAUDE.md](CLAUDE.md) for how to work on the project generally.
 
-**Overall project status: Stages 0–3 complete (fast/minimum-scope mode from here per explicit user request — functional over exhaustive). Foundation, auth, and course management with verified data isolation are in place. Ready to begin Stage 4 (Quiz System).**
+**Overall project status: Stages 0–4 complete (fast/minimum-scope mode from here per explicit user request — functional over exhaustive). Foundation, auth, course management, and the quiz system (authoring, publishing, submission, MCQ auto-grading) are in place. Ready to begin Stage 5 (AI Evaluation Engine, single-path).**
 
 ---
 
@@ -147,25 +147,37 @@ Dependencies: Stage 2.
 ---
 
 ## Stage 4 — Quiz System
-Status: NOT STARTED
+Status: COMPLETED (2026-09-15) — minimum-viable scope
 
 Objectives:
-- `assessments`, `questions`, `rubrics`, `rubric_criteria`, `submissions` schema and CRUD.
+- `assessments`, `questions`, `rubric_criteria`, `submissions`, `answers` schema and CRUD.
 - Faculty can author MCQ and short-answer questions with rubric criteria/weights.
 - Students can take a quiz and submit answers (stored only — no AI evaluation yet).
 
 Tasks:
-- Schema + migrations for assessments/questions/rubrics/rubric_criteria/submissions.
-- Faculty quiz-authoring UI (question text, type, expected answer, concepts + weights for short answer; options + correct answer for MCQ).
-- Publish/unpublish assessment state.
-- Student quiz-taking UI, submission persistence.
-- MCQ auto-grading (deterministic — no AI needed for this type).
+- [x] Migration `1757900000001_quiz-schema` — `assessments`, `questions`, `rubric_criteria`, `submissions`, `answers`.
+- [x] Faculty quiz-authoring UI (question text, type, expected answer, concepts + weights for short answer; options + correct answer for MCQ).
+- [x] Publish assessment state (draft → published, one-way; no unpublish — out of minimum scope).
+- [x] Student quiz-taking UI, submission persistence.
+- [x] MCQ auto-grading (deterministic — no AI needed for this type).
 
-Deliverables: End-to-end quiz creation → publish → student submission flow, MCQs auto-graded.
+Deliverables: End-to-end quiz creation → publish → student submission flow, MCQs auto-graded. ✅
 
-Acceptance Criteria: Rubric weights for a question sum sensibly (validated, e.g. must total 100%); a submitted short answer is retrievable by faculty; MCQ score is computed deterministically and correctly.
+Acceptance Criteria: Rubric weights for a question sum sensibly (validated, e.g. must total 100%); a submitted short answer is retrievable by faculty; MCQ score is computed deterministically and correctly. ✅ All verified — see implementation notes.
 
 Dependencies: Stage 3.
+
+Implementation notes:
+- **Schema**: `assessments` (belongs to a course, `type` fixed to `'quiz'` for now, `status` enum `draft`/`published`), `questions` (polymorphic MCQ/short-answer via nullable `mcq_options`/`mcq_correct_index`/`expected_answer` columns rather than a subtype table — simplest option for two question types), `rubric_criteria` (per short-answer question, `name` + `weight`), `submissions` (one per student per assessment, unique constraint), `answers` (per question, `mcq_selected_index`/`text_answer`, nullable `score`).
+- **Validation**: Zod discriminated union (`assessment.schema.ts`) for MCQ vs. short-answer question creation, with `.refine()` checks that `correctIndex` is a valid option index and that rubric criteria weights sum to exactly 100 — rejected with 400 before touching the DB.
+- **Auto-grading**: MCQ answers are scored deterministically at submission time (100/0) in `assessment.service.ts`. Short-answer `score` is left `null` ("pending AI evaluation") — Stage 5 fills this in; the frontend and submission-listing aggregation both treat `null` as "pending" rather than 0.
+- **Access control reused the Stage 3 pattern**: `requireAssessmentAccess` loads the assessment + parent course, checks membership, and hides draft assessments from non-owners as 404 (not 403) — consistent with `requireCourseAccess`'s existence-hiding approach. `requireAssessmentOwner` gates authoring actions (add question, publish, list submissions) to the owning faculty member.
+- **Known routing bug pattern (from Stage 3) deliberately avoided**: `assessmentsRouter.use(...)` is scoped per path prefix (`"/courses/:id/assessments"` and `"/assessments"`) rather than applied at router root, so it doesn't swallow unmatched routes / break the global 404 handler.
+- **Answer-key sanitization**: `getAssessment` strips `mcq_correct_index` and `expected_answer` from the response for non-owners (students), so a student can inspect the network response without seeing the correct answer key.
+- **Frontend**: extended `lib/api.ts` with typed assessment/question/submission functions following the existing `Course`/`createCourse` pattern. Course detail page now lists quizzes and lets faculty create one. New `app/assessments/[id]/page.tsx` renders a faculty authoring view (question list, add-question form with live weight-sum validation, publish button, submissions-with-scores list) or a student-taking view (answer form → submit → results view showing per-question score, "pending AI evaluation" for ungraded short answers) based on role — a single faculty member is always the course owner given enrollment is student-only, so `user.role === "faculty"` reliably implies ownership for any assessment the access-control layer let them load.
+- Tests performed: `npm run build`, `lint`, `typecheck`, `test` all pass at root (46/46 backend tests, up from 29; two ESLint warnings in the controller's answer-key-stripping destructure fixed by adding `varsIgnorePattern: "^_"` to the backend ESLint config alongside the existing `argsIgnorePattern`). 17 new integration tests in `assessments.test.ts`: create assessment (faculty-only), rubric weight-sum rejection, add MCQ + short-answer questions, draft hidden from non-owner as 404, publish, non-member blocked from published assessment, answer key hidden from student / visible to faculty, submission with correct MCQ auto-grading (100) and short-answer left null, duplicate submission blocked, student retrieves own submission, non-member submission blocked (404), faculty lists submissions with scores, student blocked from listing all submissions (403). Live end-to-end curl smoke test additionally confirmed the full flow (signup → course → enroll → create quiz → add MCQ + short-answer → publish → student views sanitized questions → submits → faculty lists submission with score) against the real dev Postgres database.
+- Frontend build/lint/typecheck pass; **not** interactively verified in a browser (no browser-automation tool available in this environment) — the UI logic (form state, role branching, weight-sum validation) is exercised only by TypeScript's type-checking and manual reasoning, not by clicking through it.
+- **Known limitations**: no unpublish/edit-after-publish flow; no question deletion/reordering UI; no per-answer feedback beyond raw score yet (arrives with Stage 5 AI evaluation); assessment `type` is hardcoded to `'quiz'` (assignment/document type comes in Stage 7); total score aggregation is a simple average of per-answer scores, not yet weighted by anything beyond the rubric criteria already baked into short-answer scoring (revisit if per-question weighting within an assessment becomes a requirement).
 
 ---
 

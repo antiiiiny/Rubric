@@ -100,3 +100,118 @@ export function listCourseMembers(id: string): Promise<{ members: CourseMember[]
 export function enrollStudent(id: string, email: string): Promise<{ enrolled: unknown }> {
   return apiFetch(`/courses/${id}/members`, { method: "POST", body: JSON.stringify({ email }) });
 }
+
+export type AssessmentStatus = "draft" | "published";
+export type QuestionType = "mcq" | "short_answer";
+
+export interface Assessment {
+  id: string;
+  course_id: string;
+  title: string;
+  type: "quiz";
+  status: AssessmentStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RubricCriterion {
+  id: string;
+  question_id: string;
+  name: string;
+  weight: number;
+  order_index: number;
+}
+
+export interface Question {
+  id: string;
+  assessment_id: string;
+  type: QuestionType;
+  prompt: string;
+  order_index: number;
+  mcq_options: string[] | null;
+  mcq_correct_index?: number | null;
+  expected_answer?: string | null;
+  criteria: RubricCriterion[];
+}
+
+export interface Submission {
+  id: string;
+  assessment_id: string;
+  student_id: string;
+  submitted_at: string;
+}
+
+export interface Answer {
+  id: string;
+  submission_id: string;
+  question_id: string;
+  mcq_selected_index: number | null;
+  text_answer: string | null;
+  score: string | null;
+}
+
+export function createAssessment(courseId: string, title: string): Promise<{ assessment: Assessment }> {
+  return apiFetch(`/courses/${courseId}/assessments`, { method: "POST", body: JSON.stringify({ title }) });
+}
+
+export function listAssessments(courseId: string): Promise<{ assessments: Assessment[] }> {
+  return apiFetch(`/courses/${courseId}/assessments`);
+}
+
+export function getAssessment(
+  assessmentId: string,
+): Promise<{ assessment: Assessment; questions: Question[] }> {
+  return apiFetch(`/assessments/${assessmentId}`);
+}
+
+export type CreateQuestionInput =
+  | { type: "mcq"; prompt: string; options: string[]; correctIndex: number }
+  | {
+      type: "short_answer";
+      prompt: string;
+      expectedAnswer: string;
+      criteria: { name: string; weight: number }[];
+    };
+
+export function addQuestion(
+  assessmentId: string,
+  input: CreateQuestionInput,
+): Promise<{ question: Question }> {
+  return apiFetch(`/assessments/${assessmentId}/questions`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function publishAssessment(assessmentId: string): Promise<{ status: string }> {
+  return apiFetch(`/assessments/${assessmentId}/publish`, { method: "POST" });
+}
+
+export type SubmitAnswerInput =
+  | { questionId: string; type: "mcq"; selectedIndex: number }
+  | { questionId: string; type: "short_answer"; textAnswer: string };
+
+export function submitAssessment(
+  assessmentId: string,
+  answers: SubmitAnswerInput[],
+): Promise<{ submission: Submission; answers: Answer[] }> {
+  return apiFetch(`/assessments/${assessmentId}/submissions`, {
+    method: "POST",
+    body: JSON.stringify({ answers }),
+  });
+}
+
+export function getMySubmission(
+  assessmentId: string,
+): Promise<{ submission: Submission | null; answers?: Answer[]; totalScore?: number | null }> {
+  return apiFetch(`/assessments/${assessmentId}/submissions/me`);
+}
+
+export interface SubmissionWithScore extends Submission {
+  totalScore: number | null;
+  student: { id: string; email: string; fullName: string } | null;
+}
+
+export function listSubmissions(assessmentId: string): Promise<{ submissions: SubmissionWithScore[] }> {
+  return apiFetch(`/assessments/${assessmentId}/submissions`);
+}

@@ -5,10 +5,13 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   ApiError,
+  createAssessment,
   enrollStudent,
   getCourse,
   getMe,
+  listAssessments,
   listCourseMembers,
+  type Assessment,
   type AuthUser,
   type Course,
   type CourseMember,
@@ -24,6 +27,10 @@ export default function CourseDetailPage() {
   const [enrollEmail, setEnrollEmail] = useState("");
   const [enrolling, setEnrolling] = useState(false);
   const [enrollError, setEnrollError] = useState<string | null>(null);
+  const [assessments, setAssessments] = useState<Assessment[]>([]);
+  const [newQuizTitle, setNewQuizTitle] = useState("");
+  const [creatingQuiz, setCreatingQuiz] = useState(false);
+  const [quizError, setQuizError] = useState<string | null>(null);
 
   async function refreshMembers(courseId: string, role: string) {
     if (role === "faculty") {
@@ -32,12 +39,17 @@ export default function CourseDetailPage() {
     }
   }
 
+  async function refreshAssessments(courseId: string) {
+    const { assessments } = await listAssessments(courseId);
+    setAssessments(assessments);
+  }
+
   useEffect(() => {
     async function load() {
       const [{ user }, { course }] = await Promise.all([getMe(), getCourse(params.id)]);
       setUser(user);
       setCourse(course);
-      await refreshMembers(params.id, user.role);
+      await Promise.all([refreshMembers(params.id, user.role), refreshAssessments(params.id)]);
     }
     load()
       .catch((err) =>
@@ -59,6 +71,21 @@ export default function CourseDetailPage() {
       setEnrollError(err instanceof ApiError ? err.message : "Could not enroll student.");
     } finally {
       setEnrolling(false);
+    }
+  }
+
+  async function onCreateQuiz(e: React.FormEvent) {
+    e.preventDefault();
+    setQuizError(null);
+    setCreatingQuiz(true);
+    try {
+      await createAssessment(params.id, newQuizTitle);
+      setNewQuizTitle("");
+      await refreshAssessments(params.id);
+    } catch (err) {
+      setQuizError(err instanceof ApiError ? err.message : "Could not create quiz.");
+    } finally {
+      setCreatingQuiz(false);
     }
   }
 
@@ -119,6 +146,42 @@ export default function CourseDetailPage() {
           {enrollError && <p className="mt-2 text-sm text-red-600">{enrollError}</p>}
         </div>
       )}
+
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
+        <p className="text-sm font-medium">Quizzes</p>
+        <ul className="mt-2 space-y-1 text-sm text-slate-700">
+          {assessments.map((a) => (
+            <li key={a.id}>
+              <Link href={`/assessments/${a.id}`} className="underline">
+                {a.title}
+              </Link>{" "}
+              <span className="text-xs text-slate-500">({a.status})</span>
+            </li>
+          ))}
+          {assessments.length === 0 && <li className="text-slate-500">No quizzes yet.</li>}
+        </ul>
+
+        {user?.role === "faculty" && (
+          <form onSubmit={onCreateQuiz} className="mt-4 flex gap-2">
+            <input
+              type="text"
+              placeholder="Quiz title"
+              required
+              value={newQuizTitle}
+              onChange={(e) => setNewQuizTitle(e.target.value)}
+              className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
+            />
+            <button
+              type="submit"
+              disabled={creatingQuiz}
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+            >
+              {creatingQuiz ? "Creating…" : "Create quiz"}
+            </button>
+          </form>
+        )}
+        {quizError && <p className="mt-2 text-sm text-red-600">{quizError}</p>}
+      </div>
     </main>
   );
 }
