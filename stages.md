@@ -2,12 +2,12 @@
 
 This is the master implementation roadmap. It **must** be updated after every completed stage: mark status, add an implementation summary, record architectural decisions, record tests performed, record known limitations, update the next stage if reality diverged, and update overall project status. See [CLAUDE.md](CLAUDE.md) for how to work on the project generally.
 
-**Overall project status: Stage 0 in progress. Documentation established (this update). No application code exists yet.**
+**Overall project status: Stage 0 complete. Monorepo scaffolding in place; frontend, backend, and ai-service all build, lint, and talk to each other over HTTP. Ready to begin Stage 1.**
 
 ---
 
 ## Stage 0 — Project Foundation
-Status: IN PROGRESS
+Status: COMPLETED (2026-09-15)
 
 Objectives:
 - Establish persistent project documentation (CLAUDE.md, stages.md, .claude/) so all future work has consistent context.
@@ -19,29 +19,37 @@ Tasks:
 - [x] Create `CLAUDE.md`.
 - [x] Create `stages.md`.
 - [x] Create `.claude/commands/next-stage.md`.
-- [ ] Root `package.json` with npm workspaces (`frontend`, `backend`).
-- [ ] `frontend/` — Next.js + TypeScript + Tailwind skeleton.
-- [ ] `backend/` — Express + TypeScript skeleton with a `/health` route.
-- [ ] `ai-service/` — FastAPI skeleton (own `pyproject.toml`/venv) with a `/health` route.
-- [ ] Root `.gitignore`, `.env.example`.
-- [ ] Shared TS config (ESLint/Prettier) across frontend/backend workspaces.
-- [ ] README with setup/run instructions.
-- [ ] First git commit.
+- [x] Root `package.json` with npm workspaces (`frontend`, `backend`).
+- [x] `frontend/` — Next.js + TypeScript + Tailwind skeleton.
+- [x] `backend/` — Express + TypeScript skeleton with a `/health` route.
+- [x] `ai-service/` — FastAPI skeleton (own `pyproject.toml`/venv) with a `/health` route.
+- [x] Root `.gitignore`, `.env.example`.
+- [x] ESLint config for both frontend and backend workspaces; ruff for ai-service.
+- [x] README with setup/run instructions.
+- [x] First git commit.
 
 Deliverables:
-- Documentation set (this pass).
+- Documentation set (CLAUDE.md, stages.md, `.claude/commands/next-stage.md`).
 - Runnable skeleton for all three services, each independently startable, backend able to reach ai-service over HTTP.
 
 Acceptance Criteria:
-- `npm install` at root succeeds and installs both workspaces.
-- `npm run dev` (or equivalent per-workspace scripts) starts frontend and backend without errors.
-- Backend `/health` returns 200 and (when ai-service is running) successfully round-trips a call to ai-service `/health`.
-- ai-service starts under its own venv and serves `/health` via FastAPI/uvicorn.
-- No secrets committed; `.env.example` documents required variables.
+- `npm install` at root succeeds and installs both workspaces. ✅
+- `npm run dev:backend` / `npm run dev:frontend` start without errors; ai-service starts via uvicorn under its own venv. ✅
+- Backend `/health` returns 200 and successfully round-trips a call to ai-service `/health` (`aiService: "ok"`). ✅ Verified live: ai-service on :8000, backend on :4000, frontend on :3000, full chain confirmed via curl and browser fetch.
+- `npm run build`, `npm run lint`, `npm run typecheck` all pass for both workspaces; `ruff check app` passes for ai-service. ✅
+- No secrets committed; `.env.example` documents required variables. ✅
 
 Dependencies: none (first stage).
 
-Implementation notes: Documentation (CLAUDE.md, stages.md, `.claude/commands/next-stage.md`) completed on 2026-09-15. Scaffolding (package.json, frontend/backend/ai-service skeletons, health checks) not yet started — deferred to a follow-up implementation pass per explicit user choice ("docs only first").
+Implementation notes:
+- **Monorepo**: npm workspaces (`frontend`, `backend`) under root `package.json`; `ai-service/` is an independent Python project with its own `.venv` and `pyproject.toml` (editable install, `fastapi`, `uvicorn`, `pydantic`, `pydantic-settings`; dev extras `ruff`, `pytest`, `httpx`).
+- **Frontend stack decision**: started with Next.js 14.2.5 as originally planned, but `npm audit` flagged it (and even 14.2.35) against a broad, serious advisory range including an unauthenticated RCE on Windows-hosted servers — directly relevant since this is a Windows dev machine. Upgraded to **Next.js 15.5.25 + React 19.0.0** (pinned exact, not caret) instead of jumping to Next 16, because `eslint-config-next@16` requires ESLint 9's flat-config system (a migration not worth taking on for Stage 0), while Next 15 still supports ESLint 8's `.eslintrc.json`. Residual `npm audit` findings are limited to Next's own internal bundled `postcss` (source-map/build-time tooling, not runtime-exposed) — accepted as low-risk rather than forcing the Next 16 flat-config migration prematurely.
+- Hit a transient `next build` failure (`Minified React error #31`) while prerendering `/404`/`/500` during version churn (14→16→15 switches). Root cause was a stale/partially-resolved `node_modules` from the churn, not a real code or version-compat issue — a clean `rm -rf node_modules package-lock.json` + reinstall resolved it. Worth remembering if a similar error resurfaces after a dependency bump: try a clean reinstall before assuming a real incompatibility.
+- Backend error-handling middleware requires an unused 4th `_next` param (Express convention for recognizing error handlers by arity) — added `argsIgnorePattern: "^_"` to the backend ESLint config rather than suppressing the rule entirely.
+- Added `*.egg-info/` to `.gitignore` (Python editable-install build artifact, not meant to be committed).
+- **Known limitation / flagged for user**: the working-directory `.gitignore` had a `.claude/` line appear on disk that this session did not add (likely an environment default). This means `.claude/commands/next-stage.md` is currently *not* tracked by git. Left as-is per policy on unexplained changes (flagged to the user rather than silently reverted) — revisit if `.claude/` content should be version-controlled going forward.
+- Tests performed: `npm run build`, `npm run lint`, `npm run typecheck` at root (both workspaces); `ruff check app` in ai-service; live end-to-end run of all three services with real HTTP calls (not just unit-level) confirming the health-check chain.
+- No automated test suite yet (none required at this stage — Stage 11 owns test coverage).
 
 ---
 

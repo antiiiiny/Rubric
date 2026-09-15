@@ -176,4 +176,4 @@ There is a `/next-stage` command in `.claude/commands/` that encodes this loop a
 
 ## Current Project Stage
 
-See [stages.md](stages.md) — **currently Stage 0 (Project Foundation), documentation complete, scaffolding not yet started.** Do not begin Stage 1 or later work until Stage 0's acceptance criteria are met and its status is updated.
+See [stages.md](stages.md) — **Stage 0 (Project Foundation) is COMPLETED.** The monorepo scaffolding exists and the frontend/backend/ai-service health-check chain is verified working end-to-end. Next up: Stage 1 (Backend Foundation).
