@@ -10,4 +10,8 @@ export const requestLogger = pinoHttp({
     res.setHeader("x-request-id", id);
     return id;
   },
+  redact: {
+    paths: ["req.headers.cookie", "req.headers.authorization", 'res.headers["set-cookie"]'],
+    censor: "[redacted]",
+  },
 });

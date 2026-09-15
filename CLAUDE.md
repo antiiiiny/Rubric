@@ -176,4 +176,4 @@ There is a `/next-stage` command in `.claude/commands/` that encodes this loop a
 
 ## Current Project Stage
 
-See [stages.md](stages.md) — **Stages 0–1 are COMPLETED.** The monorepo scaffolding exists, the frontend/backend/ai-service health-check chain works end-to-end, and the backend has a layered architecture (routes/controllers/services), centralized error handling, Zod-validated requests and env config, structured logging, and a passing Vitest test suite. Next up: Stage 2 (Database & Authentication).
+See [stages.md](stages.md) — **Stages 0–2 are COMPLETED.** The monorepo scaffolding exists, the frontend/backend/ai-service health-check chain works end-to-end, the backend has a layered architecture with centralized error handling, Zod validation, structured (secret-redacted) logging, and a passing Vitest test suite — and Postgres (via Docker Compose, host port 5433) plus JWT/bcrypt authentication with `users`/`courses`/`course_members` schema and RBAC middleware are all live and tested. Next up: Stage 3 (Course Management).

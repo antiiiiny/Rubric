@@ -2,7 +2,7 @@
 
 This is the master implementation roadmap. It **must** be updated after every completed stage: mark status, add an implementation summary, record architectural decisions, record tests performed, record known limitations, update the next stage if reality diverged, and update overall project status. See [CLAUDE.md](CLAUDE.md) for how to work on the project generally.
 
-**Overall project status: Stages 0–1 complete. Monorepo scaffolding in place; backend has a layered architecture (routes/controllers/services), centralized error handling, Zod validation, structured logging, and a passing test suite. Ready to begin Stage 2 (Database & Authentication).**
+**Overall project status: Stages 0–2 complete. Monorepo scaffolding, layered backend architecture, and now Postgres (via Docker Compose) + JWT/bcrypt authentication with RBAC are all in place and verified end-to-end. Ready to begin Stage 3 (Course Management).**
 
 ---
 
@@ -85,25 +85,38 @@ Implementation notes:
 ---
 
 ## Stage 2 — Database & Authentication
-Status: NOT STARTED
+Status: COMPLETED (2026-09-15)
 
 Objectives:
 - Postgres schema/migrations for `users`, `courses`, `course_members`.
 - JWT + bcrypt authentication (email/password), RBAC middleware distinguishing faculty vs. student.
 
 Tasks:
-- Choose and configure a migration tool.
-- `users`, `courses`, `course_members` tables with proper foreign keys/constraints.
-- Signup/login/logout endpoints; password hashing with bcrypt.
-- JWT issuance, httpOnly cookie storage, refresh/expiry handling.
-- RBAC middleware (`requireRole('faculty' | 'student')`) applied to protected routes.
-- Basic frontend auth pages (login/signup) wired to the backend.
+- [x] Choose and configure a migration tool (node-pg-migrate).
+- [x] `users`, `courses`, `course_members` tables with proper foreign keys/constraints.
+- [x] Signup/login/logout endpoints; password hashing (bcryptjs).
+- [x] JWT issuance, httpOnly cookie storage, expiry handling.
+- [x] RBAC middleware (`requireRole('faculty' | 'student')`) applied to protected routes.
+- [x] Basic frontend auth pages (login/signup) wired to the backend.
 
 Deliverables: Working signup/login for both roles; protected routes reject unauthenticated/unauthorized requests.
 
-Acceptance Criteria: A student cannot hit a faculty-only route (and vice versa); passwords are never stored/logged in plaintext; sessions persist across page reload via the httpOnly cookie.
+Acceptance Criteria: A student cannot hit a faculty-only route (and vice versa); passwords are never stored/logged in plaintext; sessions persist across page reload via the httpOnly cookie. ✅ All verified — see implementation notes.
 
 Dependencies: Stage 1.
+
+Implementation notes:
+- **Local Postgres via Docker Compose** (`docker-compose.yml`, root). The user's machine already runs a native Postgres service on port 5432, so the container is mapped to host port **5433** instead (`DATABASE_URL` in `.env`/`.env.example` updated accordingly) to avoid touching the existing native install.
+- **Migrations**: node-pg-migrate, JS-format migration files in `backend/migrations/`. One migration (`1757900000000_init-core-schema`) creates `users`, `courses`, `course_members` with a `pgcrypto`-backed `gen_random_uuid()` default, a case-insensitive unique index on `users.email` (`lower(email)`, no citext extension needed), `ON DELETE CASCADE` from `courses.faculty_id` → `users.id` and from `course_members` → both `courses`/`users`, and a composite PK on `course_members(course_id, user_id)`. `npm run migrate:up`/`migrate:down` (root or backend) via `--envPath` pointed at the root `.env` (node-pg-migrate's own dotenv loading defaults to its cwd, which is `backend/`, not the repo root).
+- **Password hashing**: `bcryptjs` (pure JS) rather than native `bcrypt`, to avoid a node-gyp native-compile dependency on Windows dev machines — acceptable performance trade-off at this scale, revisit only if profiling ever shows it matters.
+- **Auth**: `POST /auth/signup`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`. JWT (`jsonwebtoken`) signed with `sub`=user id, `role`=user role, 7-day expiry, delivered as an httpOnly, `sameSite=lax` cookie (`rubric_token`); `secure` flag tied to `env.isProduction`. `authenticate` middleware verifies the cookie and attaches `req.auth`; `requireRole(...roles)` gates by role, composing with `authenticate`.
+- **CORS**: switched from wildcard `cors()` to `{ origin: env.frontendUrl, credentials: true }` — required for the browser to send/receive the httpOnly cookie cross-origin (frontend :3000, backend :4000); wildcard origin is incompatible with `credentials: true` per the CORS spec. Added `FRONTEND_URL` to env config/`.env.example`.
+- **Security fix caught during verification**: the Stage 1 `pino-http` request logger was serializing the raw `Cookie` request header and `Set-Cookie` response header by default — which would have written live session JWTs into logs. Added `redact` paths (`req.headers.cookie`, `req.headers.authorization`, `res.headers["set-cookie"]`) to `requestLogger.ts` and confirmed via a live log inspection that both now show `[redacted]`.
+- **Env validation**: `DATABASE_URL` and `JWT_SECRET` (min 16 chars) are now required (no default) in the Zod env schema — the app fails to boot without them, per the Stage 1 "fail fast" principle.
+- **Frontend**: `/login` and `/signup` pages (App Router, client components), a small typed `lib/api.ts` fetch wrapper (`credentials: 'include'`, typed `ApiError`), and the home page now shows session state (signed-in user + logout button, or login/signup links) alongside the existing health widget.
+- **Testing**: `requireRole` unit-tested with mocked req/res/next (no DB). `auth.test.ts` integration-tests signup (success, duplicate email, invalid payload), login (success, wrong password, unknown email), `/auth/me` (rejected with no cookie, accepted and **stable across two consecutive requests** — the "survives page reload" check — with a valid one), logout (clears cookie, subsequent `/auth/me` then rejected), and RBAC end-to-end over real HTTP using the production `authenticate`/`requireRole` middleware mounted on a small test-only harness app (avoids adding a throwaway business route to the real app just to test RBAC). Test users are created with UUID-suffixed emails and cleaned up via `deleteUserByEmail` in `afterAll`, run against the same dev Postgres database (a dedicated test database is deferred to Stage 11 — acceptable for now since tests clean up after themselves and use collision-proof emails).
+- Tests performed: `npm run build`, `lint`, `typecheck`, `test` (20/20 passing) at root. Live smoke test: booted backend + frontend, exercised signup → `/auth/me` (with and without cookie) → logout → `/auth/me` (rejected) via curl; confirmed cookie flags (`HttpOnly`) and confirmed via `docker exec psql` that rows land correctly and get cleaned up. Frontend pages verified via curl (200 status, correct server-rendered markup for `/login` and `/signup`) and full `next build`/`lint`/`typecheck` — **not** interactively clicked in a real browser, since no browser-automation tool is available in this environment; the client-side session/logout behavior these pages depend on (`useEffect` + `getMe()`/`logout()`) is exercised indirectly through the passing API-level tests and manual curl checks, but hydration/interaction itself is unverified.
+- **Known limitations**: no dedicated test database yet (see above); no password-reset or email-verification flow (out of scope for Stage 2); JWT has no refresh-token/rotation mechanism (7-day flat expiry is acceptable for the project's demo scope, revisit if session security becomes a concern later); frontend auth pages are functional but not yet part of a shared layout/nav (that lands with Stage 3's course navigation).
 
 ---
 

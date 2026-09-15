@@ -12,6 +12,10 @@
     "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
     "lint": "npm run lint --workspace=backend && npm run lint --workspace=frontend",
     "typecheck": "npm run typecheck --workspace=backend && npm run typecheck --workspace=frontend",
-    "test": "npm run test --workspace=backend"
+    "test": "npm run test --workspace=backend",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "migrate:up": "npm run migrate:up --workspace=backend",
+    "migrate:down": "npm run migrate:down --workspace=backend"
   }
 }

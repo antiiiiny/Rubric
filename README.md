@@ -17,7 +17,7 @@ rubric/
 
 - Node.js 20+ and npm 10+
 - Python 3.11+
-- PostgreSQL (from Stage 2 onward)
+- Docker Desktop (for the local Postgres container)
 
 ## Setup
 
@@ -34,6 +34,16 @@ cd ..
 
 # Copy env template and fill in secrets
 cp .env.example .env
+
+# Start Postgres (maps container port 5432 -> host port 5433, to avoid
+# clashing with a native Postgres install; DATABASE_URL in .env.example
+# already points at 5433)
+docker compose up -d
+
+# Apply database migrations
+cd backend
+npm run migrate:up
+cd ..
 ```
 
 ## Running in development
@@ -52,7 +62,13 @@ npm run dev:backend
 npm run dev:frontend
 ```
 
-Then visit http://localhost:3000 — the home page calls the backend's `/health` endpoint, which in turn checks the AI service's `/health` endpoint, confirming all three services can talk to each other.
+Then visit http://localhost:3000 — sign up as faculty or student, log in/out, and see the session persist across reloads. The home page also calls the backend's `/health` endpoint, which in turn checks the AI service's `/health` endpoint, confirming all three services can talk to each other.
+
+## Database
+
+- Local Postgres runs via Docker Compose (`docker-compose.yml`), on host port **5433** (not 5432, to avoid colliding with a native Postgres install).
+- Migrations are managed with [node-pg-migrate](https://salsita.github.io/node-pg-migrate/): `npm run migrate:up` / `npm run migrate:down` / `npm run migrate:create -- <name>` from `backend/`.
+- Migration files live in `backend/migrations/`.
 
 ## Build / lint / typecheck
 
