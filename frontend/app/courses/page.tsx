@@ -59,7 +59,11 @@ export default function CoursesPage() {
       {user?.role === "faculty" && (
         <form onSubmit={onCreate} className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4">
           <p className="text-sm font-medium">Create a course</p>
+          <label htmlFor="course-title" className="sr-only">
+            Course title
+          </label>
           <input
+            id="course-title"
             type="text"
             placeholder="Course title"
             required
@@ -67,7 +71,11 @@ export default function CoursesPage() {
             onChange={(e) => setTitle(e.target.value)}
             className="rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
           />
+          <label htmlFor="course-description" className="sr-only">
+            Description (optional)
+          </label>
           <textarea
+            id="course-description"
             placeholder="Description (optional)"
             value={description}
             onChange={(e) => setDescription(e.target.value)}

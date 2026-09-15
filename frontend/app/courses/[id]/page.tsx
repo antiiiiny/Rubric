@@ -135,14 +135,18 @@ export default function CourseDetailPage() {
             {members?.length === 0 && <li className="text-slate-500">No students enrolled yet.</li>}
           </ul>
 
-          <form onSubmit={onEnroll} className="mt-4 flex gap-2">
+          <form onSubmit={onEnroll} className="mt-4 flex flex-wrap gap-2">
+            <label htmlFor="enroll-email" className="sr-only">
+              Student email
+            </label>
             <input
+              id="enroll-email"
               type="email"
               placeholder="student@example.com"
               required
               value={enrollEmail}
               onChange={(e) => setEnrollEmail(e.target.value)}
-              className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
+              className="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
             />
             <button
               type="submit"
@@ -173,8 +177,12 @@ export default function CourseDetailPage() {
         </ul>
 
         {user?.role === "faculty" && (
-          <form onSubmit={onCreateQuiz} className="mt-4 flex gap-2">
+          <form onSubmit={onCreateQuiz} className="mt-4 flex flex-wrap gap-2">
+            <label htmlFor="new-assessment-type" className="sr-only">
+              Assessment type
+            </label>
             <select
+              id="new-assessment-type"
               value={newQuizType}
               onChange={(e) => setNewQuizType(e.target.value as AssessmentType)}
               className="rounded-md border border-slate-300 px-3 py-2 text-sm"
@@ -182,13 +190,17 @@ export default function CourseDetailPage() {
               <option value="quiz">Quiz</option>
               <option value="assignment">Assignment</option>
             </select>
+            <label htmlFor="new-assessment-title" className="sr-only">
+              Title
+            </label>
             <input
+              id="new-assessment-title"
               type="text"
               placeholder="Title"
               required
               value={newQuizTitle}
               onChange={(e) => setNewQuizTitle(e.target.value)}
-              className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
+              className="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
             />
             <button
               type="submit"

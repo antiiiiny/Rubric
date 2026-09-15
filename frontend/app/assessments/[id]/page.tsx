@@ -211,9 +211,10 @@ function FacultyReviewForm({
       </div>
 
       <form onSubmit={onOverrideScore} className="mt-2 flex flex-wrap items-center gap-2">
-        <label className="flex items-center gap-1">
+        <label htmlFor={`final-score-${answer.id}`} className="flex items-center gap-1">
           Final score:
           <input
+            id={`final-score-${answer.id}`}
             type="number"
             min={0}
             max={100}
@@ -237,8 +238,11 @@ function FacultyReviewForm({
           <p className="font-medium text-slate-700">Or override per-criterion status:</p>
           {answer.evaluation.criteria.map((c) => (
             <div key={c.criterionId} className="mt-1 flex items-center gap-2">
-              <span className="w-40 truncate">{c.name}</span>
+              <label htmlFor={`criterion-${answer.id}-${c.criterionId}`} className="w-40 truncate">
+                {c.name}
+              </label>
               <select
+                id={`criterion-${answer.id}-${c.criterionId}`}
                 value={criterionStatuses[c.criterionId] ?? c.status}
                 onChange={(e) =>
                   setCriterionStatuses({
@@ -265,13 +269,21 @@ function FacultyReviewForm({
         </div>
       )}
 
+      <label htmlFor={`final-feedback-${answer.id}`} className="sr-only">
+        Feedback for student
+      </label>
       <textarea
+        id={`final-feedback-${answer.id}`}
         placeholder="Feedback for student (optional)"
         value={finalFeedback}
         onChange={(e) => setFinalFeedback(e.target.value)}
         className="mt-2 w-full rounded-md border border-slate-300 px-2 py-1"
       />
+      <label htmlFor={`review-comment-${answer.id}`} className="sr-only">
+        Internal comment
+      </label>
       <textarea
+        id={`review-comment-${answer.id}`}
         placeholder="Internal comment (optional)"
         value={comment}
         onChange={(e) => setComment(e.target.value)}
@@ -339,7 +351,7 @@ export default function AssessmentDetailPage() {
 
   useEffect(() => {
     load()
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load this quiz."))
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load this assessment."))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
@@ -351,7 +363,7 @@ export default function AssessmentDetailPage() {
   if (error || !assessment) {
     return (
       <main className="mx-auto max-w-2xl px-6 py-10">
-        <p className="text-sm text-red-600">{error ?? "Quiz not found."}</p>
+        <p className="text-sm text-red-600">{error ?? "Assessment not found."}</p>
         <Link href="/courses" className="mt-4 inline-block text-sm underline">
           Back to courses
         </Link>
@@ -464,7 +476,7 @@ function FacultyView({
       await publishAssessment(assessment.id);
       await onChange();
     } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Could not publish quiz.");
+      setFormError(err instanceof ApiError ? err.message : "Could not publish this assessment.");
     } finally {
       setPublishing(false);
     }
@@ -516,7 +528,7 @@ function FacultyView({
             disabled={publishing || questions.length === 0}
             className="mt-4 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
           >
-            {publishing ? "Publishing…" : "Publish quiz"}
+            {publishing ? "Publishing…" : `Publish ${isAssignment ? "assignment" : "quiz"}`}
           </button>
         )}
       </div>
@@ -524,7 +536,11 @@ function FacultyView({
       {assessment.status === "draft" && (
         <form onSubmit={onAddQuestion} className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4">
           <p className="text-sm font-medium">Add a question</p>
+          <label htmlFor="new-question-type" className="sr-only">
+            Question type
+          </label>
           <select
+            id="new-question-type"
             value={type}
             onChange={(e) => setType(e.target.value as NewQuestionType)}
             className="rounded-md border border-slate-300 px-3 py-2 text-sm"
@@ -538,7 +554,11 @@ function FacultyView({
               </>
             )}
           </select>
+          <label htmlFor="new-question-prompt" className="sr-only">
+            Question prompt
+          </label>
           <textarea
+            id="new-question-prompt"
             placeholder="Question prompt"
             required
             value={prompt}
@@ -553,10 +573,15 @@ function FacultyView({
                   <input
                     type="radio"
                     name="correctIndex"
+                    aria-label={`Mark option ${i + 1} as the correct answer`}
                     checked={correctIndex === i}
                     onChange={() => setCorrectIndex(i)}
                   />
+                  <label htmlFor={`mcq-option-${i}`} className="sr-only">
+                    Option {i + 1}
+                  </label>
                   <input
+                    id={`mcq-option-${i}`}
                     type="text"
                     placeholder={`Option ${i + 1}`}
                     required
@@ -580,7 +605,11 @@ function FacultyView({
             </div>
           ) : (
             <div className="flex flex-col gap-2">
+              <label htmlFor="new-question-expected-answer" className="sr-only">
+                Expected answer
+              </label>
               <textarea
+                id="new-question-expected-answer"
                 placeholder="Expected answer (reference for AI evaluation)"
                 required
                 value={expectedAnswer}
@@ -590,7 +619,11 @@ function FacultyView({
               <p className="text-xs text-slate-500">Rubric concepts (weights must sum to 100)</p>
               {criteria.map((c, i) => (
                 <div key={i} className="flex gap-2">
+                  <label htmlFor={`criterion-name-${i}`} className="sr-only">
+                    Concept {i + 1} name
+                  </label>
                   <input
+                    id={`criterion-name-${i}`}
                     type="text"
                     placeholder="Concept name"
                     value={c.name}
@@ -601,7 +634,11 @@ function FacultyView({
                     }}
                     className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
                   />
+                  <label htmlFor={`criterion-weight-${i}`} className="sr-only">
+                    Concept {i + 1} weight percent
+                  </label>
                   <input
+                    id={`criterion-weight-${i}`}
                     type="number"
                     placeholder="Weight %"
                     value={c.weight}
@@ -632,7 +669,11 @@ function FacultyView({
                   <p className="mt-2 text-xs text-slate-500">Required document sections</p>
                   {sections.map((s, i) => (
                     <div key={i} className="flex items-center gap-2">
+                      <label htmlFor={`section-name-${i}`} className="sr-only">
+                        Section {i + 1} name
+                      </label>
                       <input
+                        id={`section-name-${i}`}
                         type="text"
                         placeholder="Section name (e.g. Introduction)"
                         value={s.name}
@@ -728,7 +769,7 @@ function StudentView({
   const [error, setError] = useState<string | null>(null);
 
   if (assessment.status !== "published") {
-    return <p className="text-sm text-slate-500">This quiz has not been published yet.</p>;
+    return <p className="text-sm text-slate-500">This assessment has not been published yet.</p>;
   }
 
   if (mySubmission?.submission) {
@@ -824,13 +865,19 @@ function StudentView({
                 ))}
               </div>
             ) : (
-              <textarea
-                required
-                placeholder="Your answer"
-                value={textAnswers[q.id] ?? ""}
-                onChange={(e) => setTextAnswers({ ...textAnswers, [q.id]: e.target.value })}
-                className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              />
+              <>
+                <label htmlFor={`answer-${q.id}`} className="sr-only">
+                  Your answer to: {q.prompt}
+                </label>
+                <textarea
+                  id={`answer-${q.id}`}
+                  required
+                  placeholder="Your answer"
+                  value={textAnswers[q.id] ?? ""}
+                  onChange={(e) => setTextAnswers({ ...textAnswers, [q.id]: e.target.value })}
+                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                />
+              </>
             )}
           </li>
         ))}
@@ -884,7 +931,11 @@ function DocumentUploadForm({
             Required sections: {question.sections.map((s) => s.name).join(", ")}
           </p>
         )}
+        <label htmlFor="assignment-file" className="sr-only">
+          Assignment file (PDF or DOCX)
+        </label>
         <input
+          id="assignment-file"
           type="file"
           accept=".pdf,.docx"
           required
