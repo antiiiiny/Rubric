@@ -331,6 +331,20 @@ export interface ReviewAnswerInput {
   comment?: string;
 }
 
+export interface ConceptMastery {
+  concept: string;
+  totalResponses: number;
+  coveredCount: number;
+  partialCount: number;
+  missingCount: number;
+  masteryPercent: number;
+  commonMisconception: boolean;
+}
+
+export function getConceptMastery(courseId: string): Promise<{ concepts: ConceptMastery[] }> {
+  return apiFetch(`/courses/${courseId}/analytics/concept-mastery`);
+}
+
 export function reviewAnswer(
   assessmentId: string,
   answerId: string,

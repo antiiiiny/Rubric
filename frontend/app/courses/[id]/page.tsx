@@ -111,9 +111,16 @@ export default function CourseDetailPage() {
       <Link href="/courses" className="text-sm text-slate-600 underline">
         Back to courses
       </Link>
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{course.title}</h1>
-        {course.description && <p className="mt-1 text-slate-600">{course.description}</p>}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">{course.title}</h1>
+          {course.description && <p className="mt-1 text-slate-600">{course.description}</p>}
+        </div>
+        {user?.role === "faculty" && (
+          <Link href={`/courses/${course.id}/analytics`} className="whitespace-nowrap text-sm underline">
+            View analytics
+          </Link>
+        )}
       </div>
 
       {user?.role === "faculty" && (

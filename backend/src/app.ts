@@ -4,6 +4,7 @@ import express, { type Express } from "express";
 import { env } from "./config/env";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { requestLogger } from "./middleware/requestLogger";
+import { analyticsRouter } from "./routes/analytics";
 import { assessmentsRouter } from "./routes/assessments";
 import { authRouter } from "./routes/auth";
 import { coursesRouter } from "./routes/courses";
@@ -23,6 +24,7 @@ export function createApp(): Express {
   app.use(authRouter);
   app.use(coursesRouter);
   app.use(assessmentsRouter);
+  app.use(analyticsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

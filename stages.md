@@ -2,7 +2,7 @@
 
 This is the master implementation roadmap. It **must** be updated after every completed stage: mark status, add an implementation summary, record architectural decisions, record tests performed, record known limitations, update the next stage if reality diverged, and update overall project status. See [CLAUDE.md](CLAUDE.md) for how to work on the project generally.
 
-**Overall project status: Stages 0–8 complete (fast/minimum-scope mode from here per explicit user request — functional over exhaustive). Foundation, auth, course management, the quiz system, multi-agent AI evaluation, assignment/document evaluation, and the faculty review/override workflow (AI result and faculty-final result stored and queryable independently) are all live end-to-end. Ready to begin Stage 9 (Analytics).**
+**Overall project status: Stages 0–9 complete (fast/minimum-scope mode from here per explicit user request — functional over exhaustive). Foundation, auth, course management, the quiz system, multi-agent AI evaluation, assignment/document evaluation, the faculty review/override workflow, and course-level concept-mastery analytics are all live end-to-end. Ready to begin Stage 10 (UI/UX Polish).**
 
 ---
 
@@ -309,20 +309,29 @@ Implementation notes:
 ---
 
 ## Stage 9 — Analytics
-Status: NOT STARTED
+Status: COMPLETED (2026-09-15) — minimum-viable scope
 
 Objectives:
 - Class-wide concept mastery aggregation and misconception detection for faculty.
 
 Tasks:
-- Aggregation queries/views over `criterion_results` grouped by concept across a course/assessment.
-- Faculty analytics UI: concept mastery table/chart, flagged common misconceptions (e.g. "37% struggled with X").
+- [x] Aggregation queries over `criterion_results` grouped by concept across a course.
+- [x] Faculty analytics UI: concept mastery table, flagged common misconceptions.
 
-Deliverables: A faculty analytics page for a course showing concept-level mastery breakdown.
+Deliverables: A faculty analytics page for a course showing concept-level mastery breakdown. ✅
 
-Acceptance Criteria: Aggregation numbers are verifiably correct against seeded test data; page performs reasonably for a realistic class size.
+Acceptance Criteria: Aggregation numbers are verifiably correct against seeded test data; page performs reasonably for a realistic class size. ✅ Verified via tests and live smoke test — see implementation notes.
 
 Dependencies: Stage 6 (needs evaluation data to aggregate).
+
+Implementation notes:
+- **Aggregation grain: concept name, across the whole course.** `conceptMasteryForCourse` (`db/analytics.repo.ts`) is a single `GROUP BY rc.name` query joining `criterion_results` → `evaluations` → `answers` → `rubric_criteria`/`submissions`/`assessments`, filtered to one course, counting `covered`/`partial`/`missing` per concept name across every question and assessment in the course. Grouping by name (not by individual `rubric_criteria.id`) is a deliberate choice — if two different questions both define a "reduces redundancy" concept, faculty almost certainly want to see them as one aggregated concept, not two separate rows; the trade-off (accepted as a known limitation below) is that two *unrelated* concepts that happen to share a name would be merged too.
+- **Deterministic scoring, not AI-computed**: `masteryPercent` reuses the exact same status→points mapping as answer scoring (covered=100, partial=50, missing=0), computed in plain TypeScript from the SQL aggregate counts — never asserted by the LLM. `commonMisconception` is a simple, faculty-explainable threshold (≥40% of responses were partial or missing for that concept) rather than a statistical model, consistent with CLAUDE.md's "don't over-engineer" guidance for this scope.
+- **Access control reused unchanged**: `GET /courses/:id/analytics/concept-mastery` sits under the same `requireCourseAccess` + `requireCourseOwner` pattern as the member-list endpoint — a non-member faculty gets 404 (existence-hiding), an enrolled student gets 403.
+- **Frontend**: a plain data table (concept, response count, covered/partial/missing counts, mastery %, a "Common misconception" badge) at `/courses/[id]/analytics`, linked from the course detail page for faculty only. Deliberately a table, not a bar/progress chart — for a single internal report page read occasionally by one faculty member, a chart's legend/hover/dark-mode/palette-validation machinery would be over-engineering for the value it adds; the table already sorts and scans easily at realistic class sizes. Mastery percentage is color-coded (green ≥75%, amber ≥50%, red below) reusing the same status-color convention already established for criterion status elsewhere in the UI, rather than introducing a new palette.
+- Tests performed: `npm run build/lint/typecheck/test` at root (69/69 backend tests, up from 66 — new `analytics.test.ts` seeds two students' submissions against one shared concept with known AI-mocked outcomes — one "covered," one "missing" — and asserts the aggregated `totalResponses`, `coveredCount`, `missingCount`, `masteryPercent` (hand-computed: (100+0)/2 = 50), and `commonMisconception` flag (struggling share 1/2 = 0.5 ≥ 0.4 threshold) all match exactly; plus non-owning-faculty-blocked (404) and student-blocked (403) cases). Live end-to-end smoke test against the real Groq API and Postgres: submitted an answer strong on one concept and silent on another, confirmed the endpoint correctly aggregated "reduces redundancy" at 100% mastery and flagged "prevents anomalies" (0% mastery, missing) as a common misconception.
+- Frontend build/lint/typecheck pass; **not** interactively verified in a browser (no browser-automation tool in this environment) — the table renders from the same live API response shown above, verified via curl and TypeScript checking, not by viewing it rendered in a browser.
+- **Known limitations**: concepts are merged by name across all questions/assessments in a course, so two unrelated criteria that happen to share exact wording would be merged into one row (acceptable trade-off for demo scope — faculty control the wording and would naturally reuse names for genuinely shared concepts); aggregation uses the AI's original `criterion_results`, not any faculty-corrected statuses from Stage 8's per-criterion overrides (a faculty override changes the student's score but doesn't feed back into analytics) — flagged as a reasonable follow-up if analytics accuracy after heavy manual grading becomes a concern; no per-assessment (only per-course) breakdown yet, and no time-series/trend view.
 
 ---
 
