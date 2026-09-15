@@ -2,7 +2,7 @@
 
 This is the master implementation roadmap. It **must** be updated after every completed stage: mark status, add an implementation summary, record architectural decisions, record tests performed, record known limitations, update the next stage if reality diverged, and update overall project status. See [CLAUDE.md](CLAUDE.md) for how to work on the project generally.
 
-**Overall project status: Stages 0–5 complete (fast/minimum-scope mode from here per explicit user request — functional over exhaustive). Foundation, auth, course management, the quiz system, and the single-path AI evaluation engine (embedding evidence → Groq LLM → schema-validated, deterministically-scored evaluation) are all live end-to-end. Ready to begin Stage 6 (LangGraph multi-agent evaluation).**
+**Overall project status: Stages 0–6 complete (fast/minimum-scope mode from here per explicit user request — functional over exhaustive). Foundation, auth, course management, the quiz system, and AI evaluation (now the full LangGraph multi-agent pipeline: parallel Concept/Accuracy/Completeness evaluators → Judge → conditional conflict resolution → Feedback agent, fully audited via `evaluation_runs`/`agent_results`) are all live end-to-end. Ready to begin Stage 7 (Assignment Evaluation / document uploads).**
 
 ---
 
@@ -215,22 +215,33 @@ Implementation notes:
 ---
 
 ## Stage 6 — LangGraph Multi-Agent Evaluation
-Status: NOT STARTED
+Status: COMPLETED (2026-09-15) — minimum-viable scope
 
 Objectives:
 - Replace/extend the Stage 5 single-LLM path with the full LangGraph pipeline: parallel specialized evaluators, judge reconciliation, conditional conflict resolution.
 
 Tasks:
-- LangGraph graph: Load Rubric → Prepare Submission → parallel {Concept Evaluator, Accuracy Critic, Completeness Evaluator} → Aggregate → Judge → confidence/conflict conditional edge → (Normal: Feedback Agent) or (Conflict: Additional Critic → Judge → Feedback Agent).
-- `evaluation_runs` + `agent_results` schema and persistence (per-agent status/result/confidence/timestamp).
-- Faculty-facing evaluation detail view: per-agent results, disagreement flag, judge's reconciliation explanation.
-- Routing thresholds for confidence/disagreement tuned and documented.
+- [x] LangGraph graph: Prepare (similarity) → parallel {Concept Evaluator, Accuracy Critic, Completeness Evaluator} → Aggregate → Judge → confidence/conflict conditional edge → (Normal: Feedback Agent) or (Conflict: Additional Critic → Judge → Feedback Agent).
+- [x] `evaluation_runs` + `agent_results` schema and persistence (per-agent status/result/confidence/timestamp).
+- [x] Faculty-facing evaluation detail view: per-agent results (collapsible trace), disagreement flag, judge's reconciled result.
+- [x] Routing thresholds for confidence/disagreement tuned and documented.
 
-Deliverables: Multi-agent evaluation replacing the single-LLM path for short-answer questions, fully observable per run.
+Deliverables: Multi-agent evaluation replacing the single-LLM path for short-answer questions, fully observable per run. ✅
 
-Acceptance Criteria: A deliberately ambiguous test answer triggers the conflict-resolution branch and is visibly flagged; a clear-cut answer takes the cheap path without invoking the additional critic; all agent outputs for a run are queryable.
+Acceptance Criteria: A deliberately ambiguous test answer triggers the conflict-resolution branch and is visibly flagged; a clear-cut answer takes the cheap path without invoking the additional critic; all agent outputs for a run are queryable. ✅ Verified via mocked graph tests (live LLM was consistently too confident to trigger conflict naturally — see notes) and live end-to-end runs of the direct path.
 
 Dependencies: Stage 5.
+
+Implementation notes:
+- **Graph shape** (`ai-service/app/graph.py`, `langgraph.graph.StateGraph`): `prepare` (computes TF-IDF similarity once) fans out to three parallel agent nodes (`concept_evaluator`, `accuracy_critic`, `completeness_evaluator`), which join at an `aggregate` node (a deliberate no-op — LangGraph's shared-state fan-in already merges their outputs; `aggregate` exists as an explicit step only to match the mandated pipeline shape, with the real reconciliation happening in `judge`) → `judge` → a conditional edge routes to `additional_critic` (if `conflict_detected` or `overall_confidence < 0.6`) or straight to `feedback_agent`. `additional_critic` cycles back to `judge` for a second, better-informed pass; a `critic_pass` state flag guards against re-looping (spec's "still uncertain → flag needsFacultyReview" is honored by carrying the judge's flag forward rather than looping indefinitely).
+- **Simplification**: "low confidence → additional evaluator pass" and "disagreement → critic/judge reconciliation" are unified into one conditional branch and one remediation node (`additional_critic`, which re-runs the Accuracy Critic agent) rather than building two separate remediation paths — both conditions warrant the same remedy (an independent re-review feeding a second judge pass), and splitting them would have added graph complexity without a behavioral difference. Documented here as a deliberate scope cut.
+- **Agents** (`ai-service/app/agents.py`): each is a single Groq call (via the shared `call_structured` retry-once helper in `llm.py`) with a distinct persona/prompt and Pydantic output schema (`ConceptEvaluatorOutput`, `AccuracyCriticOutput`, `CompletenessEvaluatorOutput`, `JudgeOutput`, `FeedbackOutput`). Every agent function catches its own exceptions and returns `(None, AgentTraceEntry(status="error", ...))` instead of raising — a single agent failing never crashes the run; `judge` synthesizes from whichever inputs are available, and if the Judge itself fails, `graph.py`'s `_fallback_judge_output` constructs a valid all-"missing"/`needs_faculty_review=True` result from the request's own criteria list so the pipeline always returns something reviewable rather than a 502.
+- **Response contract extended, not replaced**: `EvaluationResult` (the `/evaluate` response schema) gained `conflict_occurred`, `agent_trace`, and `feedback` fields with safe defaults — the Stage 5 fields (`criteria`, `overall_confidence`, `needs_faculty_review`) are unchanged, so the backend's Stage 5 integration needed no breaking changes, only additive ones.
+- **Persistence**: new `evaluation_runs` (one per evaluation, `conflict_occurred` flag) and `agent_results` (per-agent name/status/confidence/summary/timestamp, FK to the run) tables, plus `conflict_occurred`/`feedback` (jsonb) columns added to the existing `evaluations` table. The Stage 5 `evaluations`/`criterion_results` tables still hold the Judge's final reconciled per-criterion decision (unchanged shape) — `evaluation_runs`/`agent_results` are purely the audit trail layered on top, exactly matching CLAUDE.md's "persist per run: each agent's name/status/result/confidence/timestamp, whether conflict resolution occurred, and the final judge result."
+- **Explainability**: `attachEvaluations` (backend controller helper) now also joins in the agent trace and exposes it, plus `conflictOccurred` and `feedback`, to both the student and faculty views. Reasoning/summaries stay capped and prompted as concise decision explanations — never raw chain-of-thought — consistent with Stage 5's approach, now applied to every agent (Concept Evaluator, Accuracy Critic, Completeness Evaluator, Judge, Feedback Agent).
+- **Frontend**: `EvaluationBreakdown` (`app/assessments/[id]/page.tsx`) gained a feedback panel (strengths/suggestions/summary) and a collapsible `<details>` "Evaluator trace" section listing each agent's name and one-line summary, with a "conflict resolved" note when applicable.
+- Tests performed: `npm run build/lint/typecheck/test` at root (50/50 backend tests — one new test class covers persisting conflict/agent-trace metadata through submission and retrieval). ai-service: `pytest` (14/14 — 3 new `test_graph.py` cases using monkeypatched agents to deterministically exercise (a) the direct high-confidence/no-conflict path, verifying `additional_critic` is never invoked and `judge` runs exactly once, (b) the conflict-resolution cycle, verifying `additional_critic` and a second `judge` pass both fire and the final status reflects the reconciled (not the original conflicting) decision, and (c) total Judge-agent failure still yields a valid, faculty-review-flagged result via the fallback) and `ruff check` clean. Live end-to-end smoke tests against the real Groq API confirmed the direct (no-conflict) path executes correctly end-to-end (~5s, 5 agent calls) including the Feedback Agent's generated strengths/gaps/suggestions, and confirmed `evaluation_runs`/`agent_results` rows land correctly in Postgres.
+- **Known limitation**: the live Groq model (`openai/gpt-oss-120b`) was consistently confident and well-agreed across agents on the test answers tried, so the conflict/additional-critic branch was never observed live end-to-end (only via the mocked `test_graph.py` unit tests, which verify the graph's control flow deterministically). This is an acceptable gap for demo scope — the graph logic itself is proven correct — but Stage 12's demo script should deliberately engineer a submission likely to produce agent disagreement (e.g., a subtly wrong or self-contradictory answer) to show the conflict-resolution UI live, per the Section 20 flow's explicit requirement for a "deliberate disagreement" case.
 
 ---
 

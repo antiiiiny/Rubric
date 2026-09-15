@@ -1,12 +1,15 @@
 import json
+from typing import TypeVar
 
 from groq import Groq
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from app.config import settings
 from app.schemas import EvaluationRequest, EvaluationResult
 
 _client: Groq | None = None
+
+T = TypeVar("T", bound=BaseModel)
 
 
 def get_client() -> Groq:
@@ -16,7 +19,37 @@ def get_client() -> Groq:
     return _client
 
 
-def _build_prompt(request: EvaluationRequest, similarities: dict[str, float]) -> str:
+def _call_groq(prompt: str, retry_note: str | None = None) -> str:
+    messages = [{"role": "user", "content": prompt}]
+    if retry_note:
+        messages.append({"role": "user", "content": retry_note})
+
+    response = get_client().chat.completions.create(
+        model=settings.groq_model,
+        messages=messages,
+        temperature=0.2,
+        response_format={"type": "json_object"},
+    )
+    return response.choices[0].message.content or "{}"
+
+
+def call_structured(prompt: str, response_model: type[T]) -> T:
+    """Call Groq expecting JSON matching response_model, retrying once on
+    malformed/invalid output before letting the error propagate — never
+    silently trusts unvalidated LLM output (per CLAUDE.md)."""
+    raw = _call_groq(prompt)
+    try:
+        return response_model.model_validate(json.loads(raw))
+    except (json.JSONDecodeError, ValidationError) as first_error:
+        retry_note = (
+            "Your previous response was not valid JSON matching the required schema "
+            f"({first_error}). Return ONLY the corrected JSON object, nothing else."
+        )
+        raw_retry = _call_groq(prompt, retry_note=retry_note)
+        return response_model.model_validate(json.loads(raw_retry))
+
+
+def _build_single_pass_prompt(request: EvaluationRequest, similarities: dict[str, float]) -> str:
     criteria_lines = "\n".join(
         f'- id="{c.id}" name="{c.name}" weight={c.weight}% '
         f"(lexical similarity to student answer: {similarities.get(c.id, 0.0):.2f})"
@@ -58,32 +91,10 @@ Respond with ONLY a JSON object of this exact shape, no prose before or after:
 }}"""
 
 
-def _call_groq(prompt: str, retry_note: str | None = None) -> str:
-    messages = [{"role": "user", "content": prompt}]
-    if retry_note:
-        messages.append({"role": "user", "content": retry_note})
-
-    response = get_client().chat.completions.create(
-        model=settings.groq_model,
-        messages=messages,
-        temperature=0.2,
-        response_format={"type": "json_object"},
-    )
-    return response.choices[0].message.content or "{}"
-
-
 def evaluate_with_llm(request: EvaluationRequest, similarities: dict[str, float]) -> EvaluationResult:
-    prompt = _build_prompt(request, similarities)
-
-    raw = _call_groq(prompt)
-    try:
-        return EvaluationResult.model_validate(json.loads(raw))
-    except (json.JSONDecodeError, ValidationError) as first_error:
-        retry_note = (
-            "Your previous response was not valid JSON matching the required schema "
-            f"({first_error}). Return ONLY the corrected JSON object, nothing else."
-        )
-        raw_retry = _call_groq(prompt, retry_note=retry_note)
-        # Let a second failure propagate — the caller flags it as a schema
-        # validation failure rather than silently trusting unvalidated output.
-        return EvaluationResult.model_validate(json.loads(raw_retry))
+    """Legacy single-LLM-pass evaluation path from Stage 5. Superseded by the
+    Stage 6 LangGraph multi-agent pipeline (app/graph.py) for live traffic,
+    kept here since it's still covered by tests and is a useful fallback
+    reference implementation of the minimal viable pipeline."""
+    prompt = _build_single_pass_prompt(request, similarities)
+    return call_structured(prompt, EvaluationResult)

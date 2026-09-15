@@ -15,6 +15,7 @@ import {
   type QuestionRow,
 } from "../db/assessments.repo";
 import {
+  listAgentResultsForEvaluations,
   listCriterionResultsForEvaluations,
   listEvaluationsForAnswers,
 } from "../db/evaluations.repo";
@@ -38,6 +39,14 @@ async function attachEvaluations(answers: AnswerRow[]) {
   const criteria = await findCriteriaByIds(criterionResults.map((r) => r.criterion_id));
   const criterionById = new Map(criteria.map((c) => [c.id, c]));
 
+  const agentResults = await listAgentResultsForEvaluations(evaluations.map((e) => e.id));
+  const agentTraceByEvaluation = new Map<string, typeof agentResults>();
+  for (const a of agentResults) {
+    const list = agentTraceByEvaluation.get(a.evaluation_id) ?? [];
+    list.push(a);
+    agentTraceByEvaluation.set(a.evaluation_id, list);
+  }
+
   return answers.map((answer) => {
     const evaluation = evaluationByAnswer.get(answer.id);
     if (!evaluation) {
@@ -53,12 +62,21 @@ async function attachEvaluations(answers: AnswerRow[]) {
       reasoning: r.reasoning,
       embeddingSimilarity: Number(r.embedding_similarity),
     }));
+    const agentTrace = (agentTraceByEvaluation.get(evaluation.id) ?? []).map((a) => ({
+      agentName: a.agent_name,
+      status: a.status,
+      confidence: a.confidence === null ? null : Number(a.confidence),
+      summary: a.summary,
+    }));
     return {
       ...answer,
       evaluation: {
         overallConfidence: Number(evaluation.overall_confidence),
         needsFacultyReview: evaluation.needs_faculty_review,
         failed: evaluation.failed,
+        conflictOccurred: evaluation.conflict_occurred,
+        feedback: evaluation.feedback,
+        agentTrace,
         criteria: results,
       },
     };

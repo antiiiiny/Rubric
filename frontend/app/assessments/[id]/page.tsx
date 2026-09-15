@@ -42,7 +42,9 @@ function EvaluationBreakdown({ evaluation }: { evaluation: Answer["evaluation"] 
   return (
     <div className="mt-2 rounded-md bg-slate-50 p-3 text-xs">
       {evaluation.needsFacultyReview && (
-        <p className="mb-2 font-medium text-amber-700">Flagged for faculty review (low confidence)</p>
+        <p className="mb-2 font-medium text-amber-700">
+          Flagged for faculty review{evaluation.conflictOccurred ? " (evaluators disagreed)" : " (low confidence)"}
+        </p>
       )}
       <ul className="space-y-1">
         {evaluation.criteria.map((c) => (
@@ -55,6 +57,36 @@ function EvaluationBreakdown({ evaluation }: { evaluation: Answer["evaluation"] 
           </li>
         ))}
       </ul>
+
+      {evaluation.feedback && (
+        <div className="mt-3 border-t border-slate-200 pt-2">
+          <p className="font-medium text-slate-700">Feedback</p>
+          <p className="mt-1 text-slate-600">{evaluation.feedback.summary}</p>
+          {evaluation.feedback.suggestions.length > 0 && (
+            <ul className="mt-1 list-disc pl-4 text-slate-600">
+              {evaluation.feedback.suggestions.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {evaluation.agentTrace.length > 0 && (
+        <details className="mt-3 border-t border-slate-200 pt-2">
+          <summary className="cursor-pointer font-medium text-slate-700">
+            Evaluator trace ({evaluation.agentTrace.length} steps
+            {evaluation.conflictOccurred ? ", conflict resolved" : ""})
+          </summary>
+          <ul className="mt-1 space-y-0.5 text-slate-600">
+            {evaluation.agentTrace.map((a, i) => (
+              <li key={i}>
+                <span className={a.status === "error" ? "text-red-700" : ""}>{a.agentName}</span>: {a.summary}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }

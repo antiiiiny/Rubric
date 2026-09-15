@@ -31,7 +31,68 @@ class CriterionEvaluation(BaseModel):
     embedding_similarity: float = Field(ge=0, le=1)
 
 
+class AgentTraceEntry(BaseModel):
+    agent_name: str
+    status: Literal["ok", "error"]
+    confidence: float | None = None
+    summary: str = Field(max_length=300)
+
+
+class FeedbackOutput(BaseModel):
+    strengths: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+    inaccuracies: list[str] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
+    summary: str = Field(max_length=800, default="")
+
+
 class EvaluationResult(BaseModel):
     criteria: list[CriterionEvaluation]
     overall_confidence: float = Field(ge=0, le=1)
+    needs_faculty_review: bool
+    conflict_occurred: bool = False
+    agent_trace: list[AgentTraceEntry] = Field(default_factory=list)
+    feedback: FeedbackOutput | None = None
+
+
+class ConceptCriterionAssessment(BaseModel):
+    criterion_id: str
+    status: CriterionStatus
+    evidence: str | None = None
+    confidence: float = Field(ge=0, le=1)
+    reasoning: str = Field(max_length=300)
+
+
+class ConceptEvaluatorOutput(BaseModel):
+    criteria: list[ConceptCriterionAssessment]
+
+
+class AccuracyCriterionAssessment(BaseModel):
+    criterion_id: str
+    status: CriterionStatus
+    contradiction: bool = False
+    misconception: str | None = None
+    confidence: float = Field(ge=0, le=1)
+    reasoning: str = Field(max_length=300)
+
+
+class AccuracyCriticOutput(BaseModel):
+    criteria: list[AccuracyCriterionAssessment]
+
+
+class CompletenessCriterionAssessment(BaseModel):
+    criterion_id: str
+    addressed: bool
+    confidence: float = Field(ge=0, le=1)
+    reasoning: str = Field(max_length=300)
+
+
+class CompletenessEvaluatorOutput(BaseModel):
+    criteria: list[CompletenessCriterionAssessment]
+
+
+class JudgeOutput(BaseModel):
+    criteria: list[CriterionEvaluation]
+    overall_confidence: float = Field(ge=0, le=1)
+    conflict_detected: bool
     needs_faculty_review: bool

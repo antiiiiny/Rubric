@@ -1,5 +1,10 @@
 import { updateAnswerScore } from "../db/assessments.repo";
-import { insertCriterionResults, insertEvaluation } from "../db/evaluations.repo";
+import {
+  insertAgentResults,
+  insertCriterionResults,
+  insertEvaluation,
+  insertEvaluationRun,
+} from "../db/evaluations.repo";
 import { evaluateAnswer } from "./aiService.client";
 import { logger } from "../utils/logger";
 import type { RubricCriterionRow } from "../db/assessments.repo";
@@ -45,10 +50,12 @@ export async function evaluateShortAnswer(input: {
 
     const evaluation = await insertEvaluation({
       answerId: input.answerId,
-      model: "single-pass-groq",
+      model: "langgraph-multi-agent",
       overallConfidence: result.overall_confidence,
       needsFacultyReview: result.needs_faculty_review,
       failed: false,
+      conflictOccurred: result.conflict_occurred,
+      feedback: result.feedback ?? null,
     });
 
     await insertCriterionResults(
@@ -63,6 +70,23 @@ export async function evaluateShortAnswer(input: {
       })),
     );
 
+    const agentTrace = result.agent_trace ?? [];
+    if (agentTrace.length > 0) {
+      const run = await insertEvaluationRun({
+        evaluationId: evaluation.id,
+        conflictOccurred: result.conflict_occurred,
+      });
+      await insertAgentResults(
+        run.id,
+        agentTrace.map((a) => ({
+          agentName: a.agent_name,
+          status: a.status,
+          confidence: a.confidence ?? null,
+          summary: a.summary,
+        })),
+      );
+    }
+
     await updateAnswerScore(input.answerId, score);
   } catch (err) {
     // Best-effort: a submission must never fail because the AI service is
@@ -72,7 +96,7 @@ export async function evaluateShortAnswer(input: {
     logger.error({ err, answerId: input.answerId }, "AI evaluation failed for short-answer submission");
     await insertEvaluation({
       answerId: input.answerId,
-      model: "single-pass-groq",
+      model: "langgraph-multi-agent",
       overallConfidence: 0,
       needsFacultyReview: true,
       failed: true,

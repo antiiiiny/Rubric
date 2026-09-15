@@ -154,10 +154,28 @@ export interface CriterionResult {
   embeddingSimilarity: number;
 }
 
+export interface AgentTraceEntry {
+  agentName: string;
+  status: "ok" | "error";
+  confidence: number | null;
+  summary: string;
+}
+
+export interface EvaluationFeedback {
+  strengths: string[];
+  gaps: string[];
+  inaccuracies: string[];
+  suggestions: string[];
+  summary: string;
+}
+
 export interface AnswerEvaluation {
   overallConfidence: number;
   needsFacultyReview: boolean;
   failed: boolean;
+  conflictOccurred: boolean;
+  agentTrace: AgentTraceEntry[];
+  feedback: EvaluationFeedback | null;
   criteria: CriterionResult[];
 }
 
