@@ -2,7 +2,7 @@
 
 This is the master implementation roadmap. It **must** be updated after every completed stage: mark status, add an implementation summary, record architectural decisions, record tests performed, record known limitations, update the next stage if reality diverged, and update overall project status. See [CLAUDE.md](CLAUDE.md) for how to work on the project generally.
 
-**Overall project status: Stages 0–7 complete (fast/minimum-scope mode from here per explicit user request — functional over exhaustive). Foundation, auth, course management, the quiz system, multi-agent AI evaluation, and assignment/document evaluation (PDF/DOCX upload → safe text extraction → deterministic required-section detection → the same multi-agent pipeline) are all live end-to-end. Ready to begin Stage 8 (Faculty Review).**
+**Overall project status: Stages 0–8 complete (fast/minimum-scope mode from here per explicit user request — functional over exhaustive). Foundation, auth, course management, the quiz system, multi-agent AI evaluation, assignment/document evaluation, and the faculty review/override workflow (AI result and faculty-final result stored and queryable independently) are all live end-to-end. Ready to begin Stage 9 (Analytics).**
 
 ---
 
@@ -279,21 +279,32 @@ Implementation notes:
 ---
 
 ## Stage 8 — Faculty Review
-Status: NOT STARTED
+Status: COMPLETED (2026-09-15) — minimum-viable scope
 
 Objectives:
 - Full faculty override/approval workflow, preserving both AI and faculty-final results.
 
 Tasks:
-- Faculty review UI: approve, edit score, edit feedback, override individual criteria, add comments, mark reviewed.
-- Backend: store AI result and faculty-final result as distinct, both retrievable; audit trail of who changed what and when.
-- Student view updates to reflect faculty-reviewed status where applicable.
+- [x] Faculty review UI: approve, edit score, edit feedback, override individual criteria, add comments, mark reviewed.
+- [x] Backend: store AI result and faculty-final result as distinct, both retrievable; audit trail of who changed what and when.
+- [x] Student view updates to reflect faculty-reviewed status where applicable.
 
-Deliverables: Faculty can review any AI evaluation and either approve or override it without destroying the original AI output.
+Deliverables: Faculty can review any AI evaluation and either approve or override it without destroying the original AI output. ✅
 
-Acceptance Criteria: After an override, both the original AI evaluation and the faculty-final result are independently queryable; student sees the faculty-final result once reviewed.
+Acceptance Criteria: After an override, both the original AI evaluation and the faculty-final result are independently queryable; student sees the faculty-final result once reviewed. ✅ Verified live and via tests — see implementation notes.
 
 Dependencies: Stage 6 (and Stage 7 for assignment reviews).
+
+Implementation notes:
+- **Schema**: migration `1757900000005_faculty-review-schema` adds `faculty_reviews` (one row per answer via a unique constraint — `upsertReview` uses `ON CONFLICT (answer_id) DO UPDATE`, so re-reviewing edits the same row and `updated_at` tracks the most recent change; `reviewer_id` tracks who): `status` (`approved`/`overridden`), `final_score`, `final_feedback`, `comment`, `criterion_overrides` (jsonb). Deliberately a **separate table** from `evaluations`/`criterion_results` (the AI's original result, from Stage 5) — the AI row is never mutated by a review, satisfying CLAUDE.md's "faculty overriding a grade must never overwrite/destroy the original AI evaluation" verbatim.
+- **Three ways to review** (`POST /assessments/:assessmentId/answers/:answerId/review`, faculty-owner-only), unified in one endpoint by what the request body contains: (1) send neither `finalScore` nor `criterionOverrides` → "approve," which snapshots the AI's current deterministic score as `final_score` with `status: 'approved'`; (2) send `finalScore` directly → a blunt manual override, `status: 'overridden'`; (3) send `criterionOverrides` (a subset or all criteria) → the backend merges the overrides onto the *original* AI per-criterion statuses and reuses the exact same `computeWeightedScore` function from Stage 5/6 to deterministically recompute the final score — so a partial override (e.g., correcting one criterion the AI got wrong) still respects the faculty-defined weights for the untouched criteria. `finalFeedback` (shown to the student) and `comment` (visible to faculty only... currently shown to both, see limitations) can accompany any of the three.
+- **Effective score / display precedence**: `attachEvaluations` (shared by all four answer-returning endpoints) now also joins `faculty_reviews` and computes `effectiveScore` per answer — `review.finalScore` if a review exists, else the AI's `answer.score`. The submission-level `totalScore` (`computeTotalScore`, replacing the old DB-requerying `scoreSubmission`) is now the average of `effectiveScore` across answers, computed once from the already-fetched enriched answers rather than a second query — so a single faculty override immediately and correctly changes what the student's overall grade shows, without any separate "publish review" step.
+- **Access control reused unchanged**: the review route sits under `requireAssessmentAccess` + `requireAssessmentOwner`, the same pattern as publish/add-question — a non-owning faculty member gets 404 (existence-hiding), a student gets 403 (role check fires before ownership check).
+- **Frontend**: faculty submissions list gained an expandable `FacultyReviewForm` per answer (Approve button; a final-score override form; a per-criterion status-override form seeded with the AI's original statuses; feedback/comment textareas) and a `ReviewBadge` showing the current review state. The student results view now displays `effectiveScore` instead of the raw AI `score`, plus the same `ReviewBadge` with the faculty's feedback/comment — so a reviewed answer visibly reads differently from an un-reviewed one without hiding the underlying AI evaluation (which stays visible via the existing `EvaluationBreakdown`).
+- Tests performed: `npm run build/lint/typecheck/test` at root (65/65 backend tests, up from 60 — 5 new tests in `review.test.ts`: approving preserves the AI's original score and evaluation are still queryable after review; a direct score override changes what the student sees via `totalScore`/`effectiveScore` while the original AI per-criterion "missing" result remains present in the response; a partial criterion override correctly recomputes the weighted score from mixed original+overridden statuses; a non-owning faculty member is blocked (404); a student is blocked (403)). Live end-to-end smoke test against the real Groq API and Postgres: submitted a weak answer (AI scored it 0, correctly marked the sole criterion "missing"), faculty overrode to 75 with feedback, confirmed the student's `/submissions/me` response now shows `effectiveScore: 75`/`totalScore: 75` while the original AI evaluation (`score: 0`, criterion status `missing`, full agent trace) remained fully intact and visible in the same response.
+- Frontend build/lint/typecheck pass; **not** interactively verified in a browser (no browser-automation tool in this environment) — the review form's client-side state (expand/collapse, per-criterion selects) is exercised only by TypeScript checking and the live curl-based API responses it renders, not by clicking through it.
+- **Data isolation fix caught during review-writing**: the internal `comment` field (faculty-only per CLAUDE.md's "add comments") was initially returned to students alongside the student-facing `finalFeedback` in the same `review` object. Fixed by threading a `forStudent` option through `attachEvaluations`/`mapReview` — the three student-facing endpoints (`postSubmission`, `postDocumentSubmission`, `getMySubmission`) now null out `comment` before responding, while `getSubmissions` and the review endpoint itself (both faculty-only) still return it.
+- **Known limitations**: no notification to the student when a review happens (they'd only see it on next page load/re-fetch). No "mark reviewed without changing anything" audit trail beyond the single `faculty_reviews` row's `updated_at`/`reviewer_id` — a full change history (who changed what, each previous value) would need a separate append-only log table, deferred as unnecessary for demo scope.
 
 ---
 

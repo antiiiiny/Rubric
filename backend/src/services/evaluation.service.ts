@@ -18,7 +18,7 @@ const STATUS_SCORE: Record<"covered" | "partial" | "missing", number> = {
 // Deterministic score aggregation from AI-assessed criterion status and
 // faculty-defined weights (never an LLM-asserted total) — per CLAUDE.md's
 // non-negotiable AI/deterministic split.
-function computeWeightedScore(
+export function computeWeightedScore(
   criteria: RubricCriterionRow[],
   statusByCriterion: Map<string, "covered" | "partial" | "missing">,
 ): number {

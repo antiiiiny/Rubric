@@ -215,6 +215,19 @@ export async function insertAnswer(input: {
   return result.rows[0];
 }
 
+export async function findAnswerWithinAssessment(
+  assessmentId: string,
+  answerId: string,
+): Promise<AnswerRow | null> {
+  const result = await pool.query<AnswerRow>(
+    `SELECT a.* FROM answers a
+     JOIN submissions s ON s.id = a.submission_id
+     WHERE a.id = $1 AND s.assessment_id = $2`,
+    [answerId, assessmentId],
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function findQuestionById(id: string): Promise<QuestionRow | null> {
   const result = await pool.query<QuestionRow>(`SELECT * FROM questions WHERE id = $1`, [id]);
   return result.rows[0] ?? null;

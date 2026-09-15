@@ -4,6 +4,7 @@ import {
   getAssessments,
   getMySubmission,
   getSubmissions,
+  postAnswerReview,
   postAssessment,
   postDocumentSubmission,
   postPublish,
@@ -20,6 +21,7 @@ import {
   createQuestionSchema,
   submitAssessmentSchema,
 } from "../schemas/assessment.schema";
+import { reviewAnswerSchema } from "../schemas/review.schema";
 import { asyncHandler } from "../utils/asyncHandler";
 
 export const assessmentsRouter = Router();
@@ -83,4 +85,11 @@ assessmentsRouter.get(
   requireAssessmentAccess,
   requireAssessmentOwner,
   asyncHandler(getSubmissions),
+);
+assessmentsRouter.post(
+  "/assessments/:assessmentId/answers/:answerId/review",
+  requireAssessmentAccess,
+  requireAssessmentOwner,
+  validateBody(reviewAnswerSchema),
+  asyncHandler(postAnswerReview),
 );

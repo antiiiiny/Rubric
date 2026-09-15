@@ -195,6 +195,16 @@ export interface SectionCheckResult {
   found: boolean;
 }
 
+export interface FacultyReview {
+  status: "approved" | "overridden";
+  finalScore: number | null;
+  finalFeedback: string | null;
+  comment: string | null;
+  criterionOverrides: { criterionId: string; status: CriterionStatus }[];
+  reviewerId: string;
+  updatedAt: string;
+}
+
 export interface Answer {
   id: string;
   submission_id: string;
@@ -205,6 +215,8 @@ export interface Answer {
   original_filename: string | null;
   section_check: SectionCheckResult[] | null;
   evaluation?: AnswerEvaluation | null;
+  review?: FacultyReview | null;
+  effectiveScore?: number | null;
 }
 
 export function createAssessment(
@@ -310,4 +322,22 @@ export interface SubmissionWithScore extends Submission {
 
 export function listSubmissions(assessmentId: string): Promise<{ submissions: SubmissionWithScore[] }> {
   return apiFetch(`/assessments/${assessmentId}/submissions`);
+}
+
+export interface ReviewAnswerInput {
+  finalScore?: number;
+  criterionOverrides?: { criterionId: string; status: CriterionStatus }[];
+  finalFeedback?: string;
+  comment?: string;
+}
+
+export function reviewAnswer(
+  assessmentId: string,
+  answerId: string,
+  input: ReviewAnswerInput,
+): Promise<{ review: FacultyReview }> {
+  return apiFetch(`/assessments/${assessmentId}/answers/${answerId}/review`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }

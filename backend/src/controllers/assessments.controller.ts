@@ -24,14 +24,33 @@ import {
   listCriterionResultsForEvaluations,
   listEvaluationsForAnswers,
 } from "../db/evaluations.repo";
+import { listReviewsForAnswers, type FacultyReviewRow } from "../db/reviews.repo";
 import { findUserById } from "../db/users.repo";
 import { AppError } from "../errors/AppError";
-import type { CreateAssessmentInput, CreateQuestionInput, SubmitAssessmentInput } from "../schemas/assessment.schema";
+import type {
+  CreateAssessmentInput,
+  CreateQuestionInput,
+  SubmitAssessmentInput,
+} from "../schemas/assessment.schema";
+import type { ReviewAnswerInput } from "../schemas/review.schema";
 import { submitAssessment as submitAssessmentService } from "../services/assessment.service";
 import { detectSections, extractText } from "../services/documentExtraction.service";
 import { evaluateShortAnswer } from "../services/evaluation.service";
+import { reviewAnswer as reviewAnswerService } from "../services/review.service";
 
-async function attachEvaluations(answers: AnswerRow[]) {
+function mapReview(review: FacultyReviewRow, includeInternalComment: boolean) {
+  return {
+    status: review.status,
+    finalScore: review.final_score === null ? null : Number(review.final_score),
+    finalFeedback: review.final_feedback,
+    comment: includeInternalComment ? review.comment : null,
+    criterionOverrides: review.criterion_overrides ?? [],
+    reviewerId: review.reviewer_id,
+    updatedAt: review.updated_at,
+  };
+}
+
+async function attachEvaluations(answers: AnswerRow[], opts: { forStudent: boolean } = { forStudent: false }) {
   const evaluations = await listEvaluationsForAnswers(answers.map((a) => a.id));
   const evaluationByAnswer = new Map(evaluations.map((e) => [e.answer_id, e]));
 
@@ -54,10 +73,21 @@ async function attachEvaluations(answers: AnswerRow[]) {
     agentTraceByEvaluation.set(a.evaluation_id, list);
   }
 
+  const reviews = await listReviewsForAnswers(answers.map((a) => a.id));
+  const reviewByAnswer = new Map(reviews.map((r) => [r.answer_id, r]));
+
   return answers.map((answer) => {
     const evaluation = evaluationByAnswer.get(answer.id);
+    const review = reviewByAnswer.get(answer.id);
+    const reviewOut = review ? mapReview(review, !opts.forStudent) : null;
+    const effectiveScore = reviewOut
+      ? reviewOut.finalScore
+      : answer.score === null
+        ? null
+        : Number(answer.score);
+
     if (!evaluation) {
-      return { ...answer, evaluation: null };
+      return { ...answer, evaluation: null, review: reviewOut, effectiveScore };
     }
     const results = (resultsByEvaluation.get(evaluation.id) ?? []).map((r) => ({
       criterionId: r.criterion_id,
@@ -86,6 +116,8 @@ async function attachEvaluations(answers: AnswerRow[]) {
         agentTrace,
         criteria: results,
       },
+      review: reviewOut,
+      effectiveScore,
     };
   });
 }
@@ -199,7 +231,7 @@ export async function postSubmission(req: Request, res: Response) {
   const body = req.body as SubmitAssessmentInput;
   const submission = await submitAssessmentService(assessment.id, req.auth!.sub, body);
   const rawAnswers = await listAnswersForSubmission(submission.id);
-  const answers = await attachEvaluations(rawAnswers);
+  const answers = await attachEvaluations(rawAnswers, { forStudent: true });
   res.status(201).json({ submission, answers });
 }
 
@@ -258,14 +290,13 @@ export async function postDocumentSubmission(req: Request, res: Response) {
   });
 
   const rawAnswers = await listAnswersForSubmission(submission.id);
-  const answers = await attachEvaluations(rawAnswers);
+  const answers = await attachEvaluations(rawAnswers, { forStudent: true });
   res.status(201).json({ submission, answers });
 }
 
-async function scoreSubmission(submissionId: string) {
-  const answers = await listAnswersForSubmission(submissionId);
-  if (answers.some((a) => a.score === null)) return null;
-  const total = answers.reduce((sum, a) => sum + Number(a.score), 0);
+function computeTotalScore(answers: { effectiveScore: number | null }[]): number | null {
+  if (answers.length === 0 || answers.some((a) => a.effectiveScore === null)) return null;
+  const total = answers.reduce((sum, a) => sum + (a.effectiveScore as number), 0);
   return Math.round(total / answers.length);
 }
 
@@ -276,8 +307,8 @@ export async function getMySubmission(req: Request, res: Response) {
     return;
   }
   const rawAnswers = await listAnswersForSubmission(submission.id);
-  const answers = await attachEvaluations(rawAnswers);
-  const totalScore = await scoreSubmission(submission.id);
+  const answers = await attachEvaluations(rawAnswers, { forStudent: true });
+  const totalScore = computeTotalScore(answers);
   res.status(200).json({ submission, answers, totalScore });
 }
 
@@ -286,9 +317,9 @@ export async function getSubmissions(req: Request, res: Response) {
   const withScores = await Promise.all(
     submissions.map(async (s) => {
       const student = await findUserById(s.student_id);
-      const totalScore = await scoreSubmission(s.id);
       const rawAnswers = await listAnswersForSubmission(s.id);
       const answers = await attachEvaluations(rawAnswers);
+      const totalScore = computeTotalScore(answers);
       return {
         ...s,
         totalScore,
@@ -298,4 +329,13 @@ export async function getSubmissions(req: Request, res: Response) {
     }),
   );
   res.status(200).json({ submissions: withScores });
+}
+
+export async function postAnswerReview(req: Request, res: Response) {
+  const assessment = req.assessment!;
+  const answerId = req.params.answerId;
+  const body = req.body as ReviewAnswerInput;
+
+  const review = await reviewAnswerService(assessment.id, answerId, req.auth!.sub, body);
+  res.status(200).json({ review: mapReview(review, true) });
 }

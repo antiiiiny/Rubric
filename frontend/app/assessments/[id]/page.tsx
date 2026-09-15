@@ -11,11 +11,13 @@ import {
   getMySubmission,
   listSubmissions,
   publishAssessment,
+  reviewAnswer,
   submitAssessment,
   submitDocumentAssignment,
   type Answer,
   type Assessment,
   type AuthUser,
+  type CriterionStatus,
   type Question,
   type SubmissionWithScore,
   type SubmitAnswerInput,
@@ -88,6 +90,194 @@ function EvaluationBreakdown({ evaluation }: { evaluation: Answer["evaluation"] 
           </ul>
         </details>
       )}
+    </div>
+  );
+}
+
+function ReviewBadge({ review }: { review: Answer["review"] }) {
+  if (!review) return null;
+  return (
+    <div className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-800">
+      <p className="font-medium">
+        Faculty reviewed ({review.status === "overridden" ? "score overridden" : "approved"})
+        {review.finalScore !== null ? ` — final score: ${review.finalScore}%` : ""}
+      </p>
+      {review.finalFeedback && <p className="mt-1">{review.finalFeedback}</p>}
+      {review.comment && <p className="mt-1 italic">&ldquo;{review.comment}&rdquo;</p>}
+    </div>
+  );
+}
+
+function FacultyReviewForm({
+  assessmentId,
+  answer,
+  onReviewed,
+}: {
+  assessmentId: string;
+  answer: Answer;
+  onReviewed: () => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [finalScore, setFinalScore] = useState(answer.review?.finalScore ?? answer.effectiveScore ?? 0);
+  const [finalFeedback, setFinalFeedback] = useState(answer.review?.finalFeedback ?? "");
+  const [comment, setComment] = useState(answer.review?.comment ?? "");
+  const [criterionStatuses, setCriterionStatuses] = useState<Record<string, CriterionStatus>>(() => {
+    const initial: Record<string, CriterionStatus> = {};
+    for (const c of answer.evaluation?.criteria ?? []) initial[c.criterionId] = c.status;
+    for (const o of answer.review?.criterionOverrides ?? []) initial[o.criterionId] = o.status;
+    return initial;
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onApprove() {
+    setError(null);
+    setSubmitting(true);
+    try {
+      await reviewAnswer(assessmentId, answer.id, { comment: comment || undefined });
+      await onReviewed();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not approve.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function onOverrideScore(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      await reviewAnswer(assessmentId, answer.id, {
+        finalScore,
+        finalFeedback: finalFeedback || undefined,
+        comment: comment || undefined,
+      });
+      await onReviewed();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not override score.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function onOverrideCriteria() {
+    setError(null);
+    setSubmitting(true);
+    try {
+      const criterionOverrides = Object.entries(criterionStatuses).map(([criterionId, status]) => ({
+        criterionId,
+        status,
+      }));
+      await reviewAnswer(assessmentId, answer.id, {
+        criterionOverrides,
+        finalFeedback: finalFeedback || undefined,
+        comment: comment || undefined,
+      });
+      await onReviewed();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not override criteria.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!answer.evaluation || answer.evaluation.failed) return null;
+
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="mt-2 text-xs text-slate-600 underline"
+      >
+        {answer.review ? "Edit review" : "Review this answer"}
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-2 rounded-md border border-slate-200 p-3 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={onApprove}
+          disabled={submitting}
+          className="rounded-md bg-emerald-700 px-3 py-1.5 text-white disabled:opacity-50"
+        >
+          Approve AI result
+        </button>
+        <span className="text-slate-500">or override:</span>
+      </div>
+
+      <form onSubmit={onOverrideScore} className="mt-2 flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-1">
+          Final score:
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={finalScore}
+            onChange={(e) => setFinalScore(Number(e.target.value))}
+            className="w-16 rounded-md border border-slate-300 px-2 py-1"
+          />
+          %
+        </label>
+        <button
+          type="submit"
+          disabled={submitting}
+          className="rounded-md bg-slate-900 px-3 py-1.5 text-white disabled:opacity-50"
+        >
+          Set score
+        </button>
+      </form>
+
+      {answer.evaluation.criteria.length > 0 && (
+        <div className="mt-2">
+          <p className="font-medium text-slate-700">Or override per-criterion status:</p>
+          {answer.evaluation.criteria.map((c) => (
+            <div key={c.criterionId} className="mt-1 flex items-center gap-2">
+              <span className="w-40 truncate">{c.name}</span>
+              <select
+                value={criterionStatuses[c.criterionId] ?? c.status}
+                onChange={(e) =>
+                  setCriterionStatuses({
+                    ...criterionStatuses,
+                    [c.criterionId]: e.target.value as CriterionStatus,
+                  })
+                }
+                className="rounded-md border border-slate-300 px-2 py-1"
+              >
+                <option value="covered">covered</option>
+                <option value="partial">partial</option>
+                <option value="missing">missing</option>
+              </select>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={onOverrideCriteria}
+            disabled={submitting}
+            className="mt-2 rounded-md bg-slate-900 px-3 py-1.5 text-white disabled:opacity-50"
+          >
+            Apply criteria overrides
+          </button>
+        </div>
+      )}
+
+      <textarea
+        placeholder="Feedback for student (optional)"
+        value={finalFeedback}
+        onChange={(e) => setFinalFeedback(e.target.value)}
+        className="mt-2 w-full rounded-md border border-slate-300 px-2 py-1"
+      />
+      <textarea
+        placeholder="Internal comment (optional)"
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        className="mt-2 w-full rounded-md border border-slate-300 px-2 py-1"
+      />
+      {error && <p className="mt-1 text-red-600">{error}</p>}
     </div>
   );
 }
@@ -507,6 +697,8 @@ function FacultyView({
                     )}
                     <SectionCheckList sectionCheck={a.section_check} />
                     {a.evaluation && <EvaluationBreakdown evaluation={a.evaluation} />}
+                    <ReviewBadge review={a.review} />
+                    <FacultyReviewForm assessmentId={assessment.id} answer={a} onReviewed={onChange} />
                   </div>
                 ))}
               </li>
@@ -566,11 +758,12 @@ function StudentView({
                     <p className="text-slate-600">
                       {q.type === "document" ? `File: ${answer?.original_filename ?? "—"}` : `Your answer: ${answer?.text_answer}`}{" "}
                       — score:{" "}
-                      {answer?.score === null || answer?.score === undefined
+                      {answer?.effectiveScore === null || answer?.effectiveScore === undefined
                         ? "pending AI evaluation"
-                        : `${answer.score}%`}
+                        : `${answer.effectiveScore}%`}
                     </p>
                     <SectionCheckList sectionCheck={answer?.section_check ?? null} />
+                    <ReviewBadge review={answer?.review} />
                     <EvaluationBreakdown evaluation={answer?.evaluation} />
                   </>
                 )}
