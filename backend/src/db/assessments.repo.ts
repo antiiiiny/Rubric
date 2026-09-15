@@ -130,6 +130,15 @@ export async function listQuestionsForAssessment(assessmentId: string): Promise<
   return result.rows;
 }
 
+export async function findCriteriaByIds(criterionIds: string[]): Promise<RubricCriterionRow[]> {
+  if (criterionIds.length === 0) return [];
+  const result = await pool.query<RubricCriterionRow>(
+    `SELECT * FROM rubric_criteria WHERE id = ANY($1)`,
+    [criterionIds],
+  );
+  return result.rows;
+}
+
 export async function listCriteriaForQuestions(questionIds: string[]): Promise<RubricCriterionRow[]> {
   if (questionIds.length === 0) return [];
   const result = await pool.query<RubricCriterionRow>(
@@ -178,6 +187,15 @@ export async function insertAnswer(input: {
     ],
   );
   return result.rows[0];
+}
+
+export async function updateAnswerScore(answerId: string, score: number | null): Promise<void> {
+  await pool.query(`UPDATE answers SET score = $2 WHERE id = $1`, [answerId, score]);
+}
+
+export async function findAnswerById(id: string): Promise<AnswerRow | null> {
+  const result = await pool.query<AnswerRow>(`SELECT * FROM answers WHERE id = $1`, [id]);
+  return result.rows[0] ?? null;
 }
 
 export async function listAnswersForSubmission(submissionId: string): Promise<AnswerRow[]> {

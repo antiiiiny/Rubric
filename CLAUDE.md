@@ -38,7 +38,7 @@ The backend is the system of record (Postgres, auth, business rules). The ai-ser
 - **AI service**: Python, FastAPI
 - **AI orchestration**: LangGraph (+ LangChain where it genuinely helps — not by default)
 - **LLM inference**: Groq API
-- **Embeddings**: a practical/cheap provider chosen at Stage 5 implementation time — do not over-engineer this choice early
+- **Embeddings**: TF-IDF cosine similarity (scikit-learn) — chosen at Stage 5 as the practical/cheap "evidence" signal feeding LLM verification; see stages.md Stage 5 notes for the rationale and revisit trigger
 - **Auth**: JWT (access token in an httpOnly cookie) + bcrypt password hashing. No third-party auth provider — keep infra minimal.
 
 ## AI Architecture
@@ -176,4 +176,4 @@ There is a `/next-stage` command in `.claude/commands/` that encodes this loop a
 
 ## Current Project Stage
 
-See [stages.md](stages.md) — **Stages 0–4 are COMPLETED.** The monorepo scaffolding exists, the frontend/backend/ai-service health-check chain works end-to-end, the backend has a layered architecture with centralized error handling, Zod validation, structured (secret-redacted) logging, and a passing Vitest test suite — Postgres (via Docker Compose, host port 5433) plus JWT/bcrypt authentication with `users`/`courses`/`course_members` schema and RBAC middleware are live and tested — course management (CRUD + enrollment) is in place — and the quiz system (`assessments`/`questions`/`rubric_criteria`/`submissions`/`answers`, faculty authoring UI, publish flow, student quiz-taking UI, deterministic MCQ auto-grading) is live end-to-end. Next up: Stage 5 (AI Evaluation Engine, single-path).
+See [stages.md](stages.md) — **Stages 0–5 are COMPLETED.** The monorepo scaffolding exists, the frontend/backend/ai-service health-check chain works end-to-end, the backend has a layered architecture with centralized error handling, Zod validation, structured (secret-redacted) logging, and a passing Vitest test suite — Postgres (via Docker Compose, host port 5433) plus JWT/bcrypt authentication with `users`/`courses`/`course_members` schema and RBAC middleware are live and tested — course management (CRUD + enrollment) is in place — the quiz system (`assessments`/`questions`/`rubric_criteria`/`submissions`/`answers`, faculty authoring UI, publish flow, student quiz-taking UI, deterministic MCQ auto-grading) is live end-to-end — and the single-path AI evaluation engine (`ai-service` TF-IDF similarity evidence → Groq LLM call → Pydantic-validated structured evaluation, persisted as `evaluations`/`criterion_results` with deterministic backend-side weighted scoring) automatically evaluates short-answer submissions and surfaces the breakdown to both faculty and students. Next up: Stage 6 (LangGraph multi-agent evaluation).

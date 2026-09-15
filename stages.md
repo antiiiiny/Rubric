@@ -2,7 +2,7 @@
 
 This is the master implementation roadmap. It **must** be updated after every completed stage: mark status, add an implementation summary, record architectural decisions, record tests performed, record known limitations, update the next stage if reality diverged, and update overall project status. See [CLAUDE.md](CLAUDE.md) for how to work on the project generally.
 
-**Overall project status: Stages 0–4 complete (fast/minimum-scope mode from here per explicit user request — functional over exhaustive). Foundation, auth, course management, and the quiz system (authoring, publishing, submission, MCQ auto-grading) are in place. Ready to begin Stage 5 (AI Evaluation Engine, single-path).**
+**Overall project status: Stages 0–5 complete (fast/minimum-scope mode from here per explicit user request — functional over exhaustive). Foundation, auth, course management, the quiz system, and the single-path AI evaluation engine (embedding evidence → Groq LLM → schema-validated, deterministically-scored evaluation) are all live end-to-end. Ready to begin Stage 6 (LangGraph multi-agent evaluation).**
 
 ---
 
@@ -182,23 +182,35 @@ Implementation notes:
 ---
 
 ## Stage 5 — AI Evaluation Engine (single-path)
-Status: NOT STARTED
+Status: COMPLETED (2026-09-15) — minimum-viable scope
 
 Objectives:
 - Build and prove the single-LLM structured evaluation path before introducing multi-agent orchestration, per the mandated progression: basic rubric evaluation → semantic similarity → LLM structured evaluation.
 
 Tasks:
-- ai-service: embedding generation + similarity scoring against rubric concepts.
-- ai-service: single LLM call (Groq) that takes rubric + submission + embedding evidence and returns a schema-validated structured evaluation (Pydantic).
-- backend: endpoint to trigger evaluation for a short-answer submission, persist `evaluations` + `criterion_results`.
-- Deterministic score aggregation in the backend from criterion-level AI results, using faculty weights (not LLM-computed totals).
-- Basic faculty view of an evaluation result (score, per-criterion status, evidence).
+- [x] ai-service: embedding-style similarity scoring against rubric concepts.
+- [x] ai-service: single LLM call (Groq) that takes rubric + submission + similarity evidence and returns a schema-validated structured evaluation (Pydantic).
+- [x] backend: evaluation triggered automatically on short-answer submission, persists `evaluations` + `criterion_results`.
+- [x] Deterministic score aggregation in the backend from criterion-level AI results, using faculty weights (not LLM-computed totals).
+- [x] Basic faculty and student view of an evaluation result (score, per-criterion status, evidence, reasoning).
 
-Deliverables: A short-answer submission can be evaluated end-to-end (single LLM pass) and the result displayed to faculty and student.
+Deliverables: A short-answer submission can be evaluated end-to-end (single LLM pass) and the result displayed to faculty and student. ✅
 
-Acceptance Criteria: Evaluation output always validates against the schema (malformed LLM output is caught and retried/flagged, never silently trusted); score is computed deterministically from criterion results and faculty weights, not asserted directly by the LLM.
+Acceptance Criteria: Evaluation output always validates against the schema (malformed LLM output is caught and retried/flagged, never silently trusted); score is computed deterministically from criterion results and faculty weights, not asserted directly by the LLM. ✅ Verified live and via tests — see implementation notes.
 
 Dependencies: Stage 4.
+
+Implementation notes:
+- **Embedding provider decision**: used TF-IDF cosine similarity (scikit-learn) instead of a hosted/local embedding model. Rationale: no API key or model download needed, installs in seconds (no `torch`/`sentence-transformers`), fast enough for this project's scale, and — critically — the pipeline mandate is "embedding similarity is evidence/retrieval only, never the sole determinant of correctness," which the LLM verification step already satisfies regardless of embedding quality. Documented as a deliberate trade-off in `ai-service/app/similarity.py`; revisit with a real embedding provider only if paraphrase recall proves insufficient in practice (untested edge case, flagged as a known limitation below).
+- **LLM model**: `GROQ_MODEL` env var, default `openai/gpt-oss-120b` — the originally-planned `llama-3.3-70b-versatile` returned `model_not_found` for this account's Groq API key (verified via `GET /v1/models`); `gpt-oss-120b` supports Groq's JSON mode/structured outputs and was confirmed working live.
+- **ai-service pipeline** (`app/similarity.py` → `app/llm.py` → `app/evaluate.py` → `POST /evaluate`): computes per-criterion TF-IDF similarity, builds a prompt that explicitly marks the student answer as untrusted data (prompt-injection-resistant framing per CLAUDE.md, ready for Stage 7's file uploads too), calls Groq with `response_format: json_object`, validates the response against a Pydantic `EvaluationResult` schema, and retries once with an error-correction message on invalid JSON/schema before letting a second failure propagate as a 502. `/evaluate` is internal-only (called by the backend, never exposed to the frontend).
+- **Backend evaluation flow**: `evaluateShortAnswer` (`services/evaluation.service.ts`) is invoked automatically for every short-answer answer during `submitAssessment`, in parallel across answers. It's fully best-effort — a Groq/network failure or schema-validation failure is caught, logged, and recorded as a `failed` evaluation row with `needsFacultyReview: true` rather than crashing the submission or silently leaving no record. The ai-service response is re-validated with a mirrored Zod schema (`schemas/evaluation.schema.ts`) on the Node side, since a cross-service HTTP call is still an untrusted-input boundary per CLAUDE.md's schema-validation rule.
+- **Deterministic scoring**: `computeWeightedScore` maps AI-assessed status → points (covered=100, partial=50, missing=0), multiplies by each criterion's faculty-defined weight, and divides by total weight — entirely in backend code, never LLM-asserted. Verified live: a submission with criteria weighted 40/30/30 and AI statuses covered/missing/covered produced score 70 exactly as `(40×100 + 30×0 + 30×100)/100`.
+- **Explainability**: both `getMySubmission` (student) and `getSubmissions` (faculty) now embed each short-answer's evaluation (overall confidence, needs-faculty-review flag, and per-criterion status/evidence-quote/confidence/one-sentence reasoning) via a shared `attachEvaluations` controller helper — reasoning is capped at 500 chars and explicitly prompted as "concise decision explanation, not raw chain-of-thought," never exposing the model's raw reasoning trace.
+- **Frontend**: extended `lib/api.ts` types (`AnswerEvaluation`, `CriterionResult`) and added a shared `EvaluationBreakdown` component in `app/assessments/[id]/page.tsx` — shown in both the student results view and the faculty submissions list, color-coded by status (covered/partial/missing) with evidence quotes and a review-flag banner when applicable.
+- Tests performed: `npm run build`, `lint`, `typecheck`, `test` pass at root (49/49 backend tests, up from 46 — 3 new tests in `evaluation.test.ts` mocking `aiService.client.evaluateAnswer` to verify deterministic weighted scoring, graceful degradation on AI-service failure (answer stays ungraded, flagged for review, submission still succeeds), and that a rejected/malformed AI response never drives a score). ai-service: `pytest` (11/11 passing — schema validation rejects invalid status/out-of-range confidence/malformed payloads; TF-IDF similarity sanity checks; LLM retry-once-then-raise logic verified with a mocked Groq call) and `ruff check` both clean. Live end-to-end smoke test against the real Groq API and real Postgres: created a short-answer question with 40/30/30-weighted criteria, submitted an answer missing one concept, confirmed the AI correctly flagged the missing concept with evidence and reasoning, and the deterministic score (70) matched the hand-computed expectation exactly; confirmed the answer-key/evaluation data is visible to faculty and the student's own submission alike.
+- Frontend build/lint/typecheck pass; **not** interactively verified in a browser (no browser-automation tool in this environment) — the evaluation-display UI is exercised by TypeScript checking and the live curl-based API responses it renders, not by clicking through it.
+- **Known limitations**: TF-IDF similarity is lexical, not truly semantic — a "semantically-equivalent-but-differently-worded answer" (an explicit Stage 11 test case) relies entirely on the LLM step to catch, since the similarity evidence alone would score it low; this is acceptable because the LLM is the actual arbiter of status, but worth re-testing explicitly once Stage 11's test matrix is written. No retry/backoff beyond the single JSON-repair retry (a persistent Groq outage flags every submission for review rather than queuing for later retry — acceptable for demo scope). No manual "re-run evaluation" action for faculty yet (would be a natural Stage 8 addition alongside override/approval). Evaluation is only wired for short-answer quiz questions — assignment/document evaluation is Stage 7.
 
 ---
 

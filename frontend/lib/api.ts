@@ -141,6 +141,26 @@ export interface Submission {
   submitted_at: string;
 }
 
+export type CriterionStatus = "covered" | "partial" | "missing";
+
+export interface CriterionResult {
+  criterionId: string;
+  name: string;
+  weight: number;
+  status: CriterionStatus;
+  evidence: string | null;
+  confidence: number;
+  reasoning: string;
+  embeddingSimilarity: number;
+}
+
+export interface AnswerEvaluation {
+  overallConfidence: number;
+  needsFacultyReview: boolean;
+  failed: boolean;
+  criteria: CriterionResult[];
+}
+
 export interface Answer {
   id: string;
   submission_id: string;
@@ -148,6 +168,7 @@ export interface Answer {
   mcq_selected_index: number | null;
   text_answer: string | null;
   score: string | null;
+  evaluation?: AnswerEvaluation | null;
 }
 
 export function createAssessment(courseId: string, title: string): Promise<{ assessment: Assessment }> {
@@ -209,6 +230,7 @@ export function getMySubmission(
 
 export interface SubmissionWithScore extends Submission {
   totalScore: number | null;
+  answers: Answer[];
   student: { id: string; email: string; fullName: string } | null;
 }
 

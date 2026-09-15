@@ -77,5 +77,6 @@ npm run build       # backend + frontend
 npm run lint        # backend + frontend
 npm run typecheck   # backend + frontend
 
-cd ai-service && ./.venv/Scripts/ruff check app   # ai-service lint
+cd ai-service && ./.venv/Scripts/ruff check app tests   # ai-service lint
+cd ai-service && ./.venv/Scripts/pytest -q              # ai-service tests
 ```

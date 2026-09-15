@@ -22,6 +22,43 @@ import {
 
 type NewQuestionType = "mcq" | "short_answer";
 
+const STATUS_STYLES: Record<string, string> = {
+  covered: "text-emerald-700",
+  partial: "text-amber-700",
+  missing: "text-red-700",
+};
+
+function EvaluationBreakdown({ evaluation }: { evaluation: Answer["evaluation"] }) {
+  if (!evaluation) return null;
+
+  if (evaluation.failed) {
+    return (
+      <p className="mt-2 text-xs text-amber-700">
+        AI evaluation could not be completed — flagged for faculty review.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-2 rounded-md bg-slate-50 p-3 text-xs">
+      {evaluation.needsFacultyReview && (
+        <p className="mb-2 font-medium text-amber-700">Flagged for faculty review (low confidence)</p>
+      )}
+      <ul className="space-y-1">
+        {evaluation.criteria.map((c) => (
+          <li key={c.criterionId}>
+            <span className={`font-medium ${STATUS_STYLES[c.status] ?? ""}`}>
+              {c.name} ({c.weight}%): {c.status}
+            </span>
+            <span className="text-slate-500"> — {c.reasoning}</span>
+            {c.evidence && <span className="block text-slate-500 italic">&ldquo;{c.evidence}&rdquo;</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export default function AssessmentDetailPage() {
   const params = useParams<{ id: string }>();
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -343,11 +380,18 @@ function FacultyView({
       {submissions && (
         <div className="rounded-lg border border-slate-200 bg-white p-4">
           <p className="text-sm font-medium">Submissions ({submissions.length})</p>
-          <ul className="mt-2 space-y-1 text-sm text-slate-700">
+          <ul className="mt-3 space-y-4 text-sm text-slate-700">
             {submissions.map((s) => (
-              <li key={s.id}>
-                {s.student?.fullName ?? s.student?.email} — score:{" "}
-                {s.totalScore === null ? "pending AI evaluation" : `${s.totalScore}%`}
+              <li key={s.id} className="border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+                <p className="font-medium">
+                  {s.student?.fullName ?? s.student?.email} — score:{" "}
+                  {s.totalScore === null ? "pending AI evaluation" : `${s.totalScore}%`}
+                </p>
+                {s.answers
+                  .filter((a) => a.evaluation)
+                  .map((a) => (
+                    <EvaluationBreakdown key={a.id} evaluation={a.evaluation} />
+                  ))}
               </li>
             ))}
             {submissions.length === 0 && <li className="text-slate-500">No submissions yet.</li>}
@@ -401,12 +445,15 @@ function StudentView({
                     {answer?.score ?? "—"}%
                   </p>
                 ) : (
-                  <p className="text-slate-600">
-                    Your answer: {answer?.text_answer} — score:{" "}
-                    {answer?.score === null || answer?.score === undefined
-                      ? "pending AI evaluation"
-                      : `${answer.score}%`}
-                  </p>
+                  <>
+                    <p className="text-slate-600">
+                      Your answer: {answer?.text_answer} — score:{" "}
+                      {answer?.score === null || answer?.score === undefined
+                        ? "pending AI evaluation"
+                        : `${answer.score}%`}
+                    </p>
+                    <EvaluationBreakdown evaluation={answer?.evaluation} />
+                  </>
                 )}
               </li>
             );

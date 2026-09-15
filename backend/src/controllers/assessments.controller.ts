@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import {
+  findCriteriaByIds,
   findSubmission,
   insertAssessment,
   insertQuestion,
@@ -10,12 +11,59 @@ import {
   listQuestionsForAssessment,
   listSubmissionsForAssessment,
   publishAssessment,
+  type AnswerRow,
   type QuestionRow,
 } from "../db/assessments.repo";
+import {
+  listCriterionResultsForEvaluations,
+  listEvaluationsForAnswers,
+} from "../db/evaluations.repo";
 import { findUserById } from "../db/users.repo";
 import { AppError } from "../errors/AppError";
 import type { CreateAssessmentInput, CreateQuestionInput, SubmitAssessmentInput } from "../schemas/assessment.schema";
 import { submitAssessment as submitAssessmentService } from "../services/assessment.service";
+
+async function attachEvaluations(answers: AnswerRow[]) {
+  const evaluations = await listEvaluationsForAnswers(answers.map((a) => a.id));
+  const evaluationByAnswer = new Map(evaluations.map((e) => [e.answer_id, e]));
+
+  const criterionResults = await listCriterionResultsForEvaluations(evaluations.map((e) => e.id));
+  const resultsByEvaluation = new Map<string, typeof criterionResults>();
+  for (const r of criterionResults) {
+    const list = resultsByEvaluation.get(r.evaluation_id) ?? [];
+    list.push(r);
+    resultsByEvaluation.set(r.evaluation_id, list);
+  }
+
+  const criteria = await findCriteriaByIds(criterionResults.map((r) => r.criterion_id));
+  const criterionById = new Map(criteria.map((c) => [c.id, c]));
+
+  return answers.map((answer) => {
+    const evaluation = evaluationByAnswer.get(answer.id);
+    if (!evaluation) {
+      return { ...answer, evaluation: null };
+    }
+    const results = (resultsByEvaluation.get(evaluation.id) ?? []).map((r) => ({
+      criterionId: r.criterion_id,
+      name: criterionById.get(r.criterion_id)?.name ?? "Unknown concept",
+      weight: criterionById.get(r.criterion_id)?.weight ?? 0,
+      status: r.status,
+      evidence: r.evidence,
+      confidence: Number(r.confidence),
+      reasoning: r.reasoning,
+      embeddingSimilarity: Number(r.embedding_similarity),
+    }));
+    return {
+      ...answer,
+      evaluation: {
+        overallConfidence: Number(evaluation.overall_confidence),
+        needsFacultyReview: evaluation.needs_faculty_review,
+        failed: evaluation.failed,
+        criteria: results,
+      },
+    };
+  });
+}
 
 function sanitizeQuestion(question: QuestionRow, forStudent: boolean) {
   if (!forStudent) return question;
@@ -112,7 +160,8 @@ export async function postSubmission(req: Request, res: Response) {
 
   const body = req.body as SubmitAssessmentInput;
   const submission = await submitAssessmentService(assessment.id, req.auth!.sub, body);
-  const answers = await listAnswersForSubmission(submission.id);
+  const rawAnswers = await listAnswersForSubmission(submission.id);
+  const answers = await attachEvaluations(rawAnswers);
   res.status(201).json({ submission, answers });
 }
 
@@ -129,7 +178,8 @@ export async function getMySubmission(req: Request, res: Response) {
     res.status(200).json({ submission: null });
     return;
   }
-  const answers = await listAnswersForSubmission(submission.id);
+  const rawAnswers = await listAnswersForSubmission(submission.id);
+  const answers = await attachEvaluations(rawAnswers);
   const totalScore = await scoreSubmission(submission.id);
   res.status(200).json({ submission, answers, totalScore });
 }
@@ -140,9 +190,12 @@ export async function getSubmissions(req: Request, res: Response) {
     submissions.map(async (s) => {
       const student = await findUserById(s.student_id);
       const totalScore = await scoreSubmission(s.id);
+      const rawAnswers = await listAnswersForSubmission(s.id);
+      const answers = await attachEvaluations(rawAnswers);
       return {
         ...s,
         totalScore,
+        answers,
         student: student ? { id: student.id, email: student.email, fullName: student.full_name } : null,
       };
     }),
